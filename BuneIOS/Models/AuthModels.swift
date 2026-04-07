@@ -53,3 +53,23 @@ enum AuthError: LocalizedError {
         }
     }
 }
+
+// MARK: - User Session
+struct UserSession {
+    let accessToken: String
+    let refreshToken: String?
+    let roles: [String]
+    let expiresAt: Date?
+
+    var isDriver: Bool { roles.contains("ROLE_TRANSPORT_DRIVER") || roles.contains("ROLE_DELIVERY_DRIVER") }
+    var isClient: Bool { roles.contains("ROLE_TRANSPORT_CLIENT") }
+    var isManager: Bool { roles.contains("ROLE_TRANSPORTATION_MANAGER") }
+    var isAdmin: Bool { roles.contains("ROLE_ADMIN") }
+    var isDispatcher: Bool { roles.contains("ROLE_DISPATCH_COORDINATOR") }
+    var isFleetManager: Bool { roles.contains("ROLE_VEHICLE_FLEET_MANAGER") }
+    var isComplianceOfficer: Bool { roles.contains("ROLE_TRANSPORT_COMPLIANCE_OFFICER") }
+    var canScan: Bool { isDriver || isManager || isAdmin }
+    var canCreateTransfers: Bool { isManager || isAdmin }
+    var canManage: Bool { isManager || isAdmin }
+    var canViewAllTransfers: Bool { isManager || isAdmin || isDispatcher || isComplianceOfficer }
+}

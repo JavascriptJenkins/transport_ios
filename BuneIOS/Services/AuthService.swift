@@ -21,6 +21,11 @@ class AuthService: ObservableObject {
     @Published private(set) var accessToken: String?
     private var refreshToken: String?
 
+    // MARK: - Session & Role Management
+    @Published var currentSession: UserSession?
+    @Published private(set) var userRoles: [String] = []
+    static let apiKey = Config.apiKey
+
     // MARK: - Configuration
     /// Token endpoint from the OAuth2 password grant guide
     private let tokenURL = "https://haven.bunepos.com/oauth2/token"
@@ -45,6 +50,12 @@ class AuthService: ObservableObject {
             refreshToken = tokenResponse.refreshToken
             saveTokens(access: tokenResponse.accessToken, refresh: tokenResponse.refreshToken)
             isAuthenticated = true
+
+            // Parse roles from scope
+            let roles = tokenResponse.scope?.components(separatedBy: " ") ?? []
+            self.userRoles = roles
+            let expiresAt = tokenResponse.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
+            self.currentSession = UserSession(accessToken: tokenResponse.accessToken, refreshToken: tokenResponse.refreshToken, roles: roles, expiresAt: expiresAt)
         } catch let error as AuthError {
             errorMessage = error.errorDescription
         } catch {
@@ -59,6 +70,8 @@ class AuthService: ObservableObject {
         accessToken = nil
         refreshToken = nil
         isAuthenticated = false
+        userRoles = []
+        currentSession = nil
         clearStoredTokens()
     }
 
@@ -142,11 +155,15 @@ class AuthService: ObservableObject {
     }
 
     // MARK: - Simple Token Persistence (UserDefaults for now, migrate to Keychain later)
+    private let rolesKey = "com.buneios.userRoles"
+
     private func saveTokens(access: String, refresh: String?) {
         UserDefaults.standard.set(access, forKey: accessTokenKey)
         if let refresh = refresh {
             UserDefaults.standard.set(refresh, forKey: refreshTokenKey)
         }
+        // Save roles
+        UserDefaults.standard.set(userRoles, forKey: rolesKey)
     }
 
     private func loadStoredTokens() {
@@ -154,11 +171,44 @@ class AuthService: ObservableObject {
             accessToken = access
             refreshToken = UserDefaults.standard.string(forKey: refreshTokenKey)
             isAuthenticated = true
+
+            // Load roles
+            let storedRoles = UserDefaults.standard.array(forKey: rolesKey) as? [String] ?? []
+            userRoles = storedRoles
+
+            // Recreate currentSession from stored data
+            let expiresAt: Date? = nil // Expiration is not persisted; would need separate storage
+            currentSession = UserSession(accessToken: access, refreshToken: refreshToken, roles: storedRoles, expiresAt: expiresAt)
         }
     }
 
     private func clearStoredTokens() {
         UserDefaults.standard.removeObject(forKey: accessTokenKey)
         UserDefaults.standard.removeObject(forKey: refreshTokenKey)
+        UserDefaults.standard.removeObject(forKey: rolesKey)
+    }
+
+    // MARK: - Convenience Role Properties
+    var isDriver: Bool { currentSession?.isDriver ?? false }
+    var isClient: Bool { currentSession?.isClient ?? false }
+    var isManager: Bool { currentSession?.isManager ?? false }
+    var isAdmin: Bool { currentSession?.isAdmin ?? false }
+    var canScan: Bool { currentSession?.canScan ?? false }
+    var canCreateTransfers: Bool { currentSession?.canCreateTransfers ?? false }
+    var canManage: Bool { currentSession?.canManage ?? false }
+
+    // MARK: - Authorized Request Helpers
+    func authorizedRequest(for url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    func authorizedTransportRequest(for url: URL) -> URLRequest {
+        var request = authorizedRequest(for: url)
+        request.setValue(Self.apiKey, forHTTPHeaderField: "X-API-Key")
+        return request
     }
 }

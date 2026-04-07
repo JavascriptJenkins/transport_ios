@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>BuneIOS needs camera access to scan METRC barcode tags on packages during pickup and delivery.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BuneIOS needs your location to track transport routes and provide real-time delivery updates.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>BuneIOS needs background location access to continuously track transport vehicles during active deliveries.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+	<key>TRANSPORT_API_KEY</key>
+	<string>$(TRANSPORT_API_KEY)</string>
+</dict>
+</plist>

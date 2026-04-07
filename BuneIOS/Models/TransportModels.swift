@@ -1,0 +1,594 @@
+import Foundation
+
+// MARK: - Type Aliases for API Client Compatibility
+typealias Session = TransportSession
+typealias Message = ChatMessage
+
+// MARK: - Generic API Response Wrappers
+
+struct APIResponse<T: Decodable>: Decodable {
+    let success: Bool
+    let data: T?
+    let error: String?
+    let timestamp: String?
+}
+
+/// Response format for transfer list endpoints: {"success": true, "transfers": {"TEMPLATE_TYPE": [...]}}
+struct TransferListResponse: Decodable {
+    let success: Bool
+    let transfers: [String: [Transfer]]?
+    let error: String?
+
+    /// Flattens the grouped transfers into a single array
+    var allTransfers: [Transfer] {
+        guard let transfers = transfers else { return [] }
+        return transfers.values.flatMap { $0 }
+    }
+}
+
+struct PaginatedResponse<T: Decodable>: Decodable {
+    let success: Bool
+    let data: PaginatedData<T>?
+    let error: String?
+    let timestamp: String?
+}
+
+struct PaginatedData<T: Decodable>: Decodable {
+    let content: [T]
+    let totalElements: Int?
+    let totalPages: Int?
+    let number: Int?
+    let size: Int?
+}
+
+// MARK: - Core Transfers
+
+struct Transfer: Codable, Identifiable {
+    let id: Int
+    let manifestNumber: String?
+    let shipperFacilityName: String?
+    let shipperFacilityLicenseNumber: String?
+    let status: String
+    let direction: String?
+    let packageCount: Int?
+    let estimatedDepartureDateTime: String?
+    let estimatedArrivalDateTime: String?
+    let vehiclePlate: String?
+    let driverName: String?
+    let routeId: Int?
+    let routeName: String?
+    let statusProgress: Int?
+    let statusColor: String?
+    let destinations: [TransferDestination]?
+    let createdAt: String?
+
+    // Memberwise initializer for previews and testing
+    init(
+        id: Int,
+        manifestNumber: String? = nil,
+        shipperFacilityName: String? = nil,
+        shipperFacilityLicenseNumber: String? = nil,
+        status: String,
+        direction: String? = nil,
+        packageCount: Int? = nil,
+        estimatedDepartureDateTime: String? = nil,
+        estimatedArrivalDateTime: String? = nil,
+        vehiclePlate: String? = nil,
+        driverName: String? = nil,
+        routeId: Int? = nil,
+        routeName: String? = nil,
+        statusProgress: Int? = nil,
+        statusColor: String? = nil,
+        destinations: [TransferDestination]? = nil,
+        createdAt: String? = nil
+    ) {
+        self.id = id
+        self.manifestNumber = manifestNumber
+        self.shipperFacilityName = shipperFacilityName
+        self.shipperFacilityLicenseNumber = shipperFacilityLicenseNumber
+        self.status = status
+        self.direction = direction
+        self.packageCount = packageCount
+        self.estimatedDepartureDateTime = estimatedDepartureDateTime
+        self.estimatedArrivalDateTime = estimatedArrivalDateTime
+        self.vehiclePlate = vehiclePlate
+        self.driverName = driverName
+        self.routeId = routeId
+        self.routeName = routeName
+        self.statusProgress = statusProgress
+        self.statusColor = statusColor
+        self.destinations = destinations
+        self.createdAt = createdAt
+    }
+
+    // Custom decoding to handle the actual API response format
+    // API fields: id, metrcId, manifestNumber, shipperName, shipperLicense,
+    //   receiverName, transporterName, transporterLicense, transferType,
+    //   shipmentTypeName, tulipStatus, statusLabel, statusColor,
+    //   metrcTransferState, tulipStatusReason, direction, driverName,
+    //   driverLicenseNumber, vehicleMake, vehicleModel, vehiclePlate, packageCount, etc.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: FlexibleCodingKeys.self)
+
+        // ID: try "id" first, then "transferId"
+        if let idVal = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "id")!) {
+            id = idVal
+        } else if let idVal = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "transferId")!) {
+            id = idVal
+        } else {
+            throw DecodingError.keyNotFound(
+                FlexibleCodingKeys(stringValue: "id")!,
+                DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Neither 'id' nor 'transferId' found")
+            )
+        }
+
+        manifestNumber = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "manifestNumber")!)
+
+        // Status: try "status", "tulipStatus", "statusLabel"
+        status = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "status")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "tulipStatus")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "statusLabel")!))
+            ?? "UNKNOWN"
+
+        direction = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "direction")!)
+        packageCount = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "packageCount")!)
+        statusProgress = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "statusProgress")!)
+        statusColor = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "statusColor")!)
+        createdAt = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "createdAt")!)
+
+        // Departure/Arrival
+        estimatedDepartureDateTime = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "estimatedDepartureDateTime")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "estimatedDeparture")!))
+        estimatedArrivalDateTime = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "estimatedArrivalDateTime")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "estimatedArrival")!))
+
+        // Shipper: try multiple key variations
+        shipperFacilityName = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "shipperFacilityName")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "shipperName")!))
+            ?? {
+                if let origin = try? container.decode(NestedFacility.self, forKey: FlexibleCodingKeys(stringValue: "origin")!) {
+                    return origin.name
+                }
+                return nil
+            }()
+        shipperFacilityLicenseNumber = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "shipperFacilityLicenseNumber")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "shipperLicense")!))
+
+        // Driver
+        driverName = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "driverName")!))
+            ?? {
+                if let driver = try? container.decode(NestedDriver.self, forKey: FlexibleCodingKeys(stringValue: "driver")!) {
+                    return driver.name
+                }
+                return nil
+            }()
+
+        // Vehicle plate
+        vehiclePlate = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "vehiclePlate")!))
+            ?? {
+                if let vehicle = try? container.decode(NestedVehicle.self, forKey: FlexibleCodingKeys(stringValue: "vehicle")!) {
+                    return vehicle.plate
+                }
+                return nil
+            }()
+
+        // Route
+        routeId = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "routeId")!)
+        routeName = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "routeName")!)
+
+        // Destinations: try array, then single "destination" or "receiverName"
+        if let dests = try? container.decode([TransferDestination].self, forKey: FlexibleCodingKeys(stringValue: "destinations")!) {
+            destinations = dests
+        } else if let receiverName = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "receiverName")!),
+                  !receiverName.isEmpty {
+            destinations = [TransferDestination(id: 0, recipientFacilityName: receiverName, recipientFacilityLicenseNumber: nil)]
+        } else if let dest = try? container.decode(NestedFacility.self, forKey: FlexibleCodingKeys(stringValue: "destination")!) {
+            destinations = [TransferDestination(id: 0, recipientFacilityName: dest.name, recipientFacilityLicenseNumber: dest.license)]
+        } else {
+            destinations = nil
+        }
+    }
+}
+
+// Helper types for nested API response objects
+private struct NestedFacility: Codable {
+    let name: String?
+    let license: String?
+}
+
+private struct NestedDriver: Codable {
+    let driverId: Int?
+    let name: String?
+}
+
+private struct NestedVehicle: Codable {
+    let vehicleId: Int?
+    let make: String?
+    let model: String?
+    let plate: String?
+    let status: String?
+}
+
+private struct NestedRoute: Codable {
+    let routeId: Int?
+    let name: String?
+}
+
+/// Flexible coding keys that accept any string key
+struct FlexibleCodingKeys: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { self.intValue = intValue; self.stringValue = String(intValue) }
+}
+
+struct TransferDestination: Codable, Identifiable {
+    let id: Int
+    let recipientFacilityName: String?
+    let recipientFacilityLicenseNumber: String?
+
+    init(id: Int, recipientFacilityName: String?, recipientFacilityLicenseNumber: String?) {
+        self.id = id
+        self.recipientFacilityName = recipientFacilityName
+        self.recipientFacilityLicenseNumber = recipientFacilityLicenseNumber
+    }
+}
+
+struct TransferPackage: Codable, Identifiable {
+    let id: Int
+    let packageLabel: String
+    let productName: String?
+    let shippedQuantity: Double?
+    let shippedUnit: String?
+    let receivedQuantity: Double?
+    let receivedUnit: String?
+    let wholesalePrice: Double?
+    let packageState: String?
+    let isStaged: Int?
+    let transferId: Int?
+}
+
+// MARK: - Sessions
+
+struct TransportSession: Codable, Identifiable {
+    let id: Int
+    let sessionUuid: String
+    let sessionType: String
+    let status: String
+    let packageCount: Int?
+    let driverId: Int?
+    let vehicleId: Int?
+    let destinationId: Int?
+    let routeId: Int?
+    let notes: String?
+    let shipperLicense: String?
+    let shipperName: String?
+    let transporterLicense: String?
+    let transporterName: String?
+    let recipientLicense: String?
+    let recipientName: String?
+    let transferType: String?
+    let driverName: String?
+    let vehicleMake: String?
+    let vehicleModel: String?
+    let vehiclePlate: String?
+    let errorMessage: String?
+    let submittedAt: String?
+    let createdAt: String?
+    let updatedAt: String?
+}
+
+struct SessionPackage: Codable, Identifiable {
+    let id: Int
+    let packageLabel: String
+    let productName: String?
+    let quantity: Double?
+    let unitOfMeasure: String?
+    let wholesalePrice: Double?
+    let sortOrder: Int?
+    let submissionStatus: String?
+    let errorMessage: String?
+    let createdAt: String?
+}
+
+// MARK: - Packages
+
+struct Package: Codable, Identifiable {
+    let id: Int
+    let packageLabel: String
+    let productName: String?
+    let shippedQuantity: Double?
+    let shippedUnit: String?
+    let receivedQuantity: Double?
+    let receivedUnit: String?
+    let transferId: Int?
+}
+
+// MARK: - Reference Data
+
+struct Driver: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let licenseNumber: String?
+    let phone: String?
+    let status: String?
+    let createdAt: String?
+    let updatedAt: String?
+}
+
+struct Vehicle: Codable, Identifiable {
+    let id: Int
+    let make: String?
+    let model: String?
+    let plate: String
+    let registrationNumber: String?
+    let status: String?
+    let posX: Double?
+    let posY: Double?
+    let width: Double?
+    let height: Double?
+    let color: String?
+    let createdAt: String?
+    let updatedAt: String?
+}
+
+struct Destination: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let license: String?
+    let address: String?
+    let city: String?
+    let state: String?
+    let zipcode: String?
+    let latitude: Double?
+    let longitude: Double?
+}
+
+struct Transporter: Codable, Identifiable {
+    let id: Int
+    let license: String?
+    let name: String
+    let phone: String?
+}
+
+struct TransferType: Codable, Identifiable {
+    let id: Int?
+    let name: String
+}
+
+// MARK: - Routes
+
+struct Route: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String?
+    let originAddress: String?
+    let originLat: Double?
+    let originLon: Double?
+    let destinationAddress: String?
+    let destinationLat: Double?
+    let destinationLon: Double?
+    let geofencePolygonJson: String?
+    let routePolylineJson: String?
+    let bufferMeters: Int?
+    let status: String?
+    let stops: [RouteStop]?
+    let createdAt: String?
+    let updatedAt: String?
+}
+
+struct RouteStop: Codable, Identifiable {
+    let id: Int
+    let stopOrder: Int
+    let name: String?
+    let lat: Double?
+    let lon: Double?
+    let address: String?
+    let stopType: String?
+    let estimatedMinutes: Int?
+    let createdAt: String?
+}
+
+// MARK: - Zones
+
+struct Zone: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let zoneType: String
+    let locationId: Int?
+    let packageCount: Int?
+    let posX: Double?
+    let posY: Double?
+    let width: Double?
+    let height: Double?
+    let color: String?
+    let sortOrder: Int?
+    let shipperLicense: String?
+    let vehicleId: Int?
+}
+
+struct ZonePackageAssignment: Codable, Identifiable {
+    let id: Int
+    let zoneId: Int
+    let packageLabel: String
+    let transferPackageId: Int?
+    let assignedAt: String?
+    let removedAt: String?
+}
+
+struct ZoneScanAudit: Codable, Identifiable {
+    let id: Int
+    let packageLabel: String
+    let action: String
+    let success: Bool
+    let errorMessage: String?
+    let productName: String?
+    let transferManifestNumber: String?
+    let transferId: Int?
+    let zoneName: String?
+    let scannedBy: String?
+    let scannedAt: String?
+}
+
+// MARK: - Totes
+
+struct Tote: Codable, Identifiable {
+    let id: Int
+    let toteNumber: String
+    let status: String
+    let toteConfigId: Int?
+    let transferId: Int?
+    let packageCount: Int?
+    let notes: String?
+    let createdBy: String?
+    let createdAt: String?
+}
+
+struct ToteConfiguration: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String?
+    let widthInches: Double?
+    let heightInches: Double?
+    let lengthInches: Double?
+    let price: Double?
+    let isArchived: Bool?
+    let createdAt: String?
+}
+
+struct TotePackage: Codable, Identifiable {
+    let id: Int
+    let toteId: Int
+    let packageLabel: String
+    let transferPackageId: Int?
+    let addedBy: String?
+    let addedAt: String?
+    let removedBy: String?
+    let removedAt: String?
+}
+
+// MARK: - GPS & Tracking
+
+struct GPSPing: Codable {
+    let vehicleId: Int
+    let transferId: Int?
+    let latitude: Double
+    let longitude: Double
+    let speed: Double?
+    let heading: Double?
+    let accuracy: Double?
+    let timestamp: String
+    let driverName: String?
+}
+
+struct TrackingEvent: Codable, Identifiable {
+    let id: Int
+    let transferId: Int
+    let eventType: String
+    let lat: Double?
+    let lon: Double?
+    let notes: String?
+    let timestamp: String?
+    let source: String?
+    let createdAt: String?
+}
+
+struct VehicleLocationPing: Codable, Identifiable {
+    let id: Int?
+    let vehicleId: Int
+    let latitude: Double
+    let longitude: Double
+    let speed: Double?
+    let heading: Double?
+    let accuracy: Double?
+    let timestamp: String
+}
+
+// MARK: - Audit
+
+struct ActionLog: Codable, Identifiable {
+    let id: Int
+    let actionType: String
+    let actionLabel: String?
+    let sessionUuid: String?
+    let licenseNumber: String?
+    let packageCount: Int?
+    let manifestNumber: String?
+    let recipientName: String?
+    let detailSummary: String?
+    let metrcResponse: String?
+    let status: String?
+    let userEmail: String?
+    let createdAt: String?
+}
+
+// MARK: - Media
+
+struct PackageMedia: Codable, Identifiable {
+    let id: Int
+    let packageLabel: String
+    let filename: String?
+    let originalFilename: String?
+    let fileType: String?
+    let mimeType: String?
+    let fileSize: Int?
+    let uploadedBy: String?
+    let uploadedAt: String?
+    let transferId: Int?
+    let notes: String?
+}
+
+// MARK: - Scanning (Pickup/Delivery)
+
+struct ScanSession: Codable {
+    let sessionId: Int
+    let transferId: Int
+    var packages: [ScanPackage]
+    let scannedCount: Int
+    let totalCount: Int
+}
+
+struct ScanPackage: Codable {
+    let label: String
+    let productName: String?
+    var scanned: Bool
+}
+
+struct DeliveryCompletion: Codable {
+    let signatureData: String
+    let signerName: String
+}
+
+struct DeliveryReceipt: Codable {
+    let receiptUrl: String
+    let qrCodeUrl: String
+}
+
+// MARK: - Chat
+
+struct ChatMessage: Codable, Identifiable {
+    let messageId: Int?
+    var id: Int? { messageId }
+    let transferId: Int
+    let sender: String
+    let senderName: String?
+    let text: String
+    let timestamp: String
+}
+
+// MARK: - Public Tracking
+
+struct TrackingStatus: Codable {
+    let transferId: Int
+    let status: String
+    let step: Int
+    let totalSteps: Int
+    let eta: String?
+    let overdue: Bool?
+    let departed: Bool?
+    let metrcState: String?
+    let hasPickupSession: Bool?
+    let hasDeliverySession: Bool?
+    let isDriver: Bool?
+}

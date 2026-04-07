@@ -25,5 +25,8 @@ Podfile.lock
 # Secrets / connector configs with embedded API keys
 *.dxt
 
+# Local secrets injected at build time via xcconfig — never commit
+Config.xcconfig
+
 # macOS
 .DS_Store
