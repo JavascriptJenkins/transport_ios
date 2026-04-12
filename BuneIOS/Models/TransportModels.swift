@@ -60,6 +60,7 @@ struct Transfer: Codable, Identifiable {
     let statusProgress: Int?
     let statusColor: String?
     let destinations: [TransferDestination]?
+    let packages: [Package]?
     let createdAt: String?
 
     // Memberwise initializer for previews and testing
@@ -80,6 +81,7 @@ struct Transfer: Codable, Identifiable {
         statusProgress: Int? = nil,
         statusColor: String? = nil,
         destinations: [TransferDestination]? = nil,
+        packages: [Package]? = nil,
         createdAt: String? = nil
     ) {
         self.id = id
@@ -98,6 +100,7 @@ struct Transfer: Codable, Identifiable {
         self.statusProgress = statusProgress
         self.statusColor = statusColor
         self.destinations = destinations
+        self.packages = packages
         self.createdAt = createdAt
     }
 
@@ -172,9 +175,12 @@ struct Transfer: Codable, Identifiable {
                 return nil
             }()
 
-        // Route
-        routeId = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "routeId")!)
-        routeName = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "routeName")!)
+        // Route: try top-level fields first, then nested route object
+        let nestedRoute = try? container.decode(NestedRoute.self, forKey: FlexibleCodingKeys(stringValue: "route")!)
+        routeId = (try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "routeId")!))
+            ?? nestedRoute?.routeId
+        routeName = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "routeName")!))
+            ?? nestedRoute?.name
 
         // Destinations: try array, then single "destination" or "receiverName"
         if let dests = try? container.decode([TransferDestination].self, forKey: FlexibleCodingKeys(stringValue: "destinations")!) {
@@ -187,6 +193,9 @@ struct Transfer: Codable, Identifiable {
         } else {
             destinations = nil
         }
+
+        // Packages: detail endpoint returns packages inline
+        packages = try? container.decode([Package].self, forKey: FlexibleCodingKeys(stringValue: "packages")!)
     }
 }
 
@@ -303,6 +312,35 @@ struct Package: Codable, Identifiable {
     let receivedQuantity: Double?
     let receivedUnit: String?
     let transferId: Int?
+    let itemCategory: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: FlexibleCodingKeys.self)
+
+        // ID: try "id", "transferPackageId", "packageId", or fallback to packageLabel hash
+        if let idVal = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "id")!) {
+            id = idVal
+        } else if let idVal = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "transferPackageId")!) {
+            id = idVal
+        } else if let idVal = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "packageId")!) {
+            id = idVal
+        } else {
+            // Inline packages from detail endpoint have no ID — use label hash
+            let label = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "packageLabel")!)
+            id = abs(label?.hashValue ?? Int.random(in: 1...999999))
+        }
+
+        packageLabel = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "packageLabel")!)) ?? "Unknown"
+        productName = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "productName")!)
+        shippedQuantity = try? container.decode(Double.self, forKey: FlexibleCodingKeys(stringValue: "shippedQuantity")!)
+        shippedUnit = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "shippedUnit")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "shippedUnitOfMeasureName")!))
+        receivedQuantity = try? container.decode(Double.self, forKey: FlexibleCodingKeys(stringValue: "receivedQuantity")!)
+        receivedUnit = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "receivedUnit")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "receivedUnitOfMeasureName")!))
+        transferId = try? container.decode(Int.self, forKey: FlexibleCodingKeys(stringValue: "transferId")!)
+        itemCategory = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "itemCategory")!)
+    }
 }
 
 // MARK: - Reference Data

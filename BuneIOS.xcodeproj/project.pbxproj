@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		4E93D0042F849A4A008F7981 /* Config.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 4E93D0032F849A4A008F7981 /* Config.xcconfig */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -231,7 +230,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4E93D0042F849A4A008F7981 /* Config.xcconfig in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -291,6 +289,7 @@
 /* Begin XCBuildConfiguration section */
 		4EB88DB72F7F1BE600FB758A /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4E93D0032F849A4A008F7981 /* Config.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -419,6 +418,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BuneIOS/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "BuneIOS needs camera access to scan METRC barcode tags on packages during pickup and delivery.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "BuneIOS needs background location access to continuously track transport vehicles during active deliveries.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "BuneIOS needs your location to track transport routes and provide real-time delivery updates.";
@@ -443,6 +443,7 @@
 		};
 		4EB88DBB2F7F1BE600FB758A /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4E93D0032F849A4A008F7981 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -450,6 +451,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BuneIOS/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "BuneIOS needs camera access to scan METRC barcode tags on packages during pickup and delivery.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "BuneIOS needs background location access to continuously track transport vehicles during active deliveries.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "BuneIOS needs your location to track transport routes and provide real-time delivery updates.";

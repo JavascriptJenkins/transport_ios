@@ -171,6 +171,7 @@ class TransportAPIClient: ObservableObject {
 
     private func performRequest(method: String, path: String, body: Encodable?) async throws -> (Data, Int) {
         guard let url = URL(string: baseURL + path) else {
+            print("❌ [API] Bad URL: \(baseURL + path)")
             throw URLError(.badURL)
         }
 
@@ -190,32 +191,57 @@ class TransportAPIClient: ObservableObject {
             request.httpBody = try JSONEncoder().encode(body)
         }
 
+        #if DEBUG
+        print("🌐 [API] \(method) \(url.absoluteString)")
+        print("🌐 [API] API-Key present: \(!apiKey.isEmpty), Token present: \(authService.accessToken != nil)")
+        #endif
+
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("❌ [API] Response is not HTTPURLResponse for \(path)")
             throw URLError(.badServerResponse)
         }
+
+        #if DEBUG
+        print("🌐 [API] \(method) \(path) → HTTP \(httpResponse.statusCode) (\(data.count) bytes)")
+        if !(200...299).contains(httpResponse.statusCode),
+           let bodyStr = String(data: data, encoding: .utf8) {
+            print("❌ [API] Error body: \(String(bodyStr.prefix(500)))")
+        }
+        #endif
 
         return (data, httpResponse.statusCode)
     }
 
     private func decodeResponse<T: Decodable>(_ data: Data, statusCode: Int) throws -> T {
+        #if DEBUG
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("🔍 [decodeResponse] Type: \(T.self), Status: \(statusCode)")
+            print("🔍 [decodeResponse] Raw JSON (first 500): \(String(jsonString.prefix(500)))")
+        }
+        #endif
+
         guard (200...299).contains(statusCode) else {
             // Try to extract error message from API response
             if let errorResponse = try? JSONDecoder().decode(APIResponse<EmptyData>.self, from: data),
                let errorMsg = errorResponse.error {
-                throw APIError.serverError(errorMsg)
+                throw APIError.serverError("HTTP \(statusCode): \(errorMsg)")
             }
-            throw URLError(.badServerResponse)
+            throw APIError.serverError("HTTP \(statusCode): Server returned an error")
         }
 
         // Try to unwrap APIResponse<T> envelope first
-        if let apiResponse = try? JSONDecoder().decode(APIResponse<T>.self, from: data) {
+        do {
+            let apiResponse = try JSONDecoder().decode(APIResponse<T>.self, from: data)
             if let responseData = apiResponse.data {
+                print("✅ [decodeResponse] Successfully unwrapped APIResponse<\(T.self)>")
                 return responseData
             } else if let error = apiResponse.error {
                 throw APIError.serverError(error)
             }
+        } catch {
+            print("⚠️ [decodeResponse] APIResponse<\(T.self)> decode failed: \(error)")
         }
 
         // Fallback: try direct decode (for endpoints that don't use the wrapper)
@@ -227,9 +253,9 @@ class TransportAPIClient: ObservableObject {
         guard (200...299).contains(statusCode) else {
             if let errorResponse = try? JSONDecoder().decode(APIResponse<EmptyData>.self, from: data),
                let errorMsg = errorResponse.error {
-                throw APIError.serverError(errorMsg)
+                throw APIError.serverError("HTTP \(statusCode): \(errorMsg)")
             }
-            throw URLError(.badServerResponse)
+            throw APIError.serverError("HTTP \(statusCode): Server returned an error")
         }
 
         // Debug: print raw response for troubleshooting
@@ -297,6 +323,7 @@ class TransportAPIClient: ObservableObject {
         size: Int? = nil,
         status: String? = nil
     ) async throws -> [Transfer] {
+        // Dashboard list endpoint (grouped by direction) — works and has special response format
         var path = "/transport/api/transfers"
         var components = URLComponents()
 
@@ -317,89 +344,92 @@ class TransportAPIClient: ObservableObject {
         return response.allTransfers
     }
 
+    // MCP: GET /api/v1/transport/{id}  (no /transfers/ segment)
     func getTransfer(id: Int) async throws -> Transfer {
-        try await get(path: "/transport/api/transfers/\(id)")
+        try await get(path: "/api/v1/transport/\(id)")
     }
 
+    // MCP: POST /api/v1/transport/{id}/status  (POST, not PUT)
     func updateTransferStatus(id: Int, status: String) async throws -> Transfer {
         struct StatusRequest: Encodable {
             let status: String
         }
-        return try await put(path: "/transport/api/transfers/\(id)/status", body: StatusRequest(status: status))
+        return try await post(path: "/api/v1/transport/\(id)/status", body: StatusRequest(status: status))
     }
 
+    // MCP: POST /api/v1/transport/{id}/stage-package
     func stagePackage(transferId: Int, packageLabel: String) async throws -> Package {
         struct StageRequest: Encodable {
             let packageLabel: String
         }
-        return try await post(path: "/transport/api/transfers/\(transferId)/stage", body: StageRequest(packageLabel: packageLabel))
+        return try await post(path: "/api/v1/transport/\(transferId)/stage-package", body: StageRequest(packageLabel: packageLabel))
     }
 
+    // MCP: POST /api/v1/transport/{id}/assign-route  (POST, not PUT)
     func assignRoute(transferId: Int, routeId: Int) async throws -> Transfer {
         struct AssignRequest: Encodable {
             let routeId: Int
         }
-        return try await put(path: "/transport/api/transfers/\(transferId)/route", body: AssignRequest(routeId: routeId))
+        return try await post(path: "/api/v1/transport/\(transferId)/assign-route", body: AssignRequest(routeId: routeId))
     }
 
+    // MCP: GET /api/v1/transport/{id}/packages  (no /transfers/ segment)
     func getTransferPackages(transferId: Int) async throws -> [Package] {
-        try await getPaginated(path: "/transport/api/transfers/\(transferId)/packages")
+        try await getPaginated(path: "/api/v1/transport/\(transferId)/packages")
     }
 
+    // MCP: GET /api/v1/transport/scan-package?label={barcode}  (query param, not path)
     func scanPackage(barcode: String) async throws -> Package {
-        struct ScanRequest: Encodable {
-            let barcode: String
-        }
-        return try await post(path: "/transport/api/packages/scan", body: ScanRequest(barcode: barcode))
+        try await get(path: "/api/v1/transport/scan-package?label=\(barcode)")
     }
 
     // MARK: - Sessions
 
     func createSession(type: String) async throws -> Session {
         struct CreateSessionRequest: Encodable {
-            let type: String
+            let sessionType: String
         }
-        return try await post(path: "/transport/api/sessions", body: CreateSessionRequest(type: type))
+        return try await post(path: "/api/v1/transport/sessions", body: CreateSessionRequest(sessionType: type))
     }
 
     func listSessions() async throws -> [Session] {
-        try await getPaginated(path: "/transport/api/sessions")
+        try await getPaginated(path: "/api/v1/transport/sessions")
     }
 
     func getSession(uuid: String) async throws -> Session {
-        try await get(path: "/transport/api/sessions/\(uuid)")
+        try await get(path: "/api/v1/transport/sessions/\(uuid)")
     }
 
     func updateSession(uuid: String, config: SessionUpdateRequest) async throws -> Session {
-        try await put(path: "/transport/api/sessions/\(uuid)", body: config)
+        try await put(path: "/api/v1/transport/sessions/\(uuid)", body: config)
     }
 
     func deleteSession(uuid: String) async throws {
-        try await delete(path: "/transport/api/sessions/\(uuid)")
+        try await delete(path: "/api/v1/transport/sessions/\(uuid)")
     }
 
     func addPackageToSession(uuid: String, packageTag: String) async throws -> Session {
         struct AddPackageRequest: Encodable {
             let packageTag: String
         }
-        return try await post(path: "/transport/api/sessions/\(uuid)/packages", body: AddPackageRequest(packageTag: packageTag))
+        return try await post(path: "/api/v1/transport/sessions/\(uuid)/package", body: AddPackageRequest(packageTag: packageTag))
     }
 
     func bulkAddPackages(uuid: String, packageTags: [String]) async throws -> Session {
         struct BulkAddRequest: Encodable {
             let packageTags: [String]
         }
-        return try await post(path: "/transport/api/sessions/\(uuid)/packages/bulk", body: BulkAddRequest(packageTags: packageTags))
+        return try await post(path: "/api/v1/transport/sessions/\(uuid)/packages/bulk", body: BulkAddRequest(packageTags: packageTags))
     }
 
     @discardableResult
     func removePackageFromSession(uuid: String, packageLabel: String) async throws -> Session {
-        try await delete(path: "/transport/api/sessions/\(uuid)/packages/\(packageLabel)")
+        try await delete(path: "/api/v1/transport/sessions/\(uuid)/package/\(packageLabel)")
         return try await getSession(uuid: uuid)
     }
 
     func submitSession(uuid: String) async throws -> Session {
-        return try await post(path: "/transport/api/sessions/\(uuid)/submit", body: nil)
+        return try await post(path: "/api/v1/transport/sessions/\(uuid)/submit", body: nil)
     }
 
     // MARK: - Pickup Scan
@@ -471,11 +501,11 @@ class TransportAPIClient: ObservableObject {
     // MARK: - GPS
 
     func submitGPSPing(_ ping: GPSPing) async throws -> GPSPingResponse {
-        try await post(path: "/transport/api/gps/ping", body: ping)
+        try await post(path: "/api/v1/transport/gps-ping", body: ping)
     }
 
     func getVehicleHistory(vehicleId: Int, from: String? = nil, to: String? = nil) async throws -> [GPSPing] {
-        var path = "/transport/api/gps/vehicles/\(vehicleId)/history"
+        var path = "/api/v1/transport/gps/vehicles/\(vehicleId)/history"
         var components = URLComponents()
 
         var queryItems: [URLQueryItem] = []
@@ -493,17 +523,17 @@ class TransportAPIClient: ObservableObject {
     }
 
     func getVehicleLatest(vehicleId: Int) async throws -> GPSPing {
-        try await get(path: "/transport/api/gps/vehicles/\(vehicleId)/latest")
+        try await get(path: "/api/v1/transport/gps/vehicles/\(vehicleId)/latest")
     }
 
     func trackTransfer(transferId: Int) async throws -> TrackingEvent {
-        try await get(path: "/transport/api/transfers/\(transferId)/track")
+        try await get(path: "/api/v1/transport/tracking-events/\(transferId)")
     }
 
     // MARK: - Routes
 
     func listRoutes() async throws -> [Route] {
-        try await getPaginated(path: "/transport/api/routes")
+        try await getPaginated(path: "/api/v1/transport/routes")
     }
 
     func createRoute(name: String, description: String? = nil) async throws -> Route {
@@ -511,39 +541,39 @@ class TransportAPIClient: ObservableObject {
             let name: String
             let description: String?
         }
-        return try await post(path: "/transport/api/routes", body: CreateRouteRequest(name: name, description: description))
+        return try await post(path: "/api/v1/transport/routes", body: CreateRouteRequest(name: name, description: description))
     }
 
     func getRoute(id: Int) async throws -> Route {
-        try await get(path: "/transport/api/routes/\(id)")
+        try await get(path: "/api/v1/transport/routes/\(id)")
     }
 
     func deleteRoute(id: Int) async throws {
-        try await delete(path: "/transport/api/routes/\(id)")
+        try await delete(path: "/api/v1/transport/routes/\(id)")
     }
 
     func addStop(routeId: Int, stop: RouteStopRequest) async throws -> Route {
-        return try await post(path: "/transport/api/routes/\(routeId)/stops", body: stop)
+        return try await post(path: "/api/v1/transport/routes/\(routeId)/stops", body: stop)
     }
 
     @discardableResult
     func removeStop(routeId: Int, stopId: Int) async throws -> Route {
-        try await delete(path: "/transport/api/routes/\(routeId)/stops/\(stopId)")
+        try await delete(path: "/api/v1/transport/routes/\(routeId)/stops/\(stopId)")
         return try await getRoute(id: routeId)
     }
 
     func setGeofence(routeId: Int, config: GeofenceConfig) async throws -> Route {
-        return try await post(path: "/transport/api/routes/\(routeId)/geofence", body: config)
+        return try await post(path: "/api/v1/transport/routes/\(routeId)/geofence", body: config)
     }
 
     // MARK: - Zones
 
     func listZones() async throws -> [Zone] {
-        try await getPaginated(path: "/transport/api/zones")
+        try await getPaginated(path: "/api/v1/transport/zones")
     }
 
     func getZone(id: Int) async throws -> Zone {
-        try await get(path: "/transport/api/zones/\(id)")
+        try await get(path: "/api/v1/transport/zones/\(id)")
     }
 
     func scanIntoZone(zoneId: Int, packageLabel: String, action: String) async throws -> Package {
@@ -551,83 +581,75 @@ class TransportAPIClient: ObservableObject {
             let packageLabel: String
             let action: String
         }
-        return try await post(path: "/transport/api/zones/\(zoneId)/scan", body: ScanRequest(packageLabel: packageLabel, action: action))
+        return try await post(path: "/api/v1/transport/zones/\(zoneId)/scan", body: ScanRequest(packageLabel: packageLabel, action: action))
     }
 
     func getZonePackages(zoneId: Int) async throws -> [Package] {
-        try await getPaginated(path: "/transport/api/zones/\(zoneId)/packages")
+        try await getPaginated(path: "/api/v1/transport/zones/\(zoneId)/packages")
     }
 
     func getZoneAudit(zoneId: Int) async throws -> [ZoneScanAudit] {
-        try await getPaginated(path: "/transport/api/zones/\(zoneId)/audit")
+        try await getPaginated(path: "/api/v1/transport/zones/\(zoneId)/audit")
     }
 
     // MARK: - Totes
 
     func listTotes() async throws -> [Tote] {
-        try await getPaginated(path: "/transport/api/totes")
+        try await getPaginated(path: "/api/v1/transport/totes")
     }
 
     func addPackageToTote(toteId: Int, packageLabel: String) async throws -> Tote {
         struct AddPackageRequest: Encodable {
             let packageLabel: String
         }
-        return try await post(path: "/transport/api/totes/\(toteId)/packages", body: AddPackageRequest(packageLabel: packageLabel))
+        return try await post(path: "/api/v1/transport/totes/\(toteId)/packages", body: AddPackageRequest(packageLabel: packageLabel))
     }
 
     @discardableResult
     func removePackageFromTote(toteId: Int, packageId: Int) async throws -> Tote {
-        try await delete(path: "/transport/api/totes/\(toteId)/packages/\(packageId)")
-        return try await get(path: "/transport/api/totes/\(toteId)")
+        try await delete(path: "/api/v1/transport/totes/\(toteId)/packages/\(packageId)")
+        return try await get(path: "/api/v1/transport/totes/\(toteId)")
     }
 
     // MARK: - Reference Data
 
     func listDrivers() async throws -> [Driver] {
-        try await getPaginated(path: "/transport/api/reference/drivers")
+        try await getPaginated(path: "/api/v1/transport/drivers")
     }
 
     func listVehicles() async throws -> [Vehicle] {
-        try await getPaginated(path: "/transport/api/reference/vehicles")
+        try await getPaginated(path: "/api/v1/transport/vehicles")
     }
 
     func listDestinations() async throws -> [Destination] {
-        try await getPaginated(path: "/transport/api/reference/destinations")
+        try await getPaginated(path: "/api/v1/transport/destinations")
     }
 
     func listTransporters() async throws -> [Transporter] {
-        try await getPaginated(path: "/transport/api/reference/transporters")
+        try await getPaginated(path: "/api/v1/transport/transporters")
     }
 
     func listTransferTypes() async throws -> [TransferType] {
-        try await getPaginated(path: "/transport/api/reference/transfer-types")
+        try await getPaginated(path: "/api/v1/transport/transfer-types")
     }
 
     // MARK: - Chat/Messaging
+    // NOTE: Messaging endpoints do NOT exist in the v1 API yet.
+    // These are placeholder stubs that return empty results to avoid 404 errors.
 
     func loadMessages(transferId: Int, since: String? = nil) async throws -> [Message] {
-        var path = "/transport/api/transfers/\(transferId)/messages"
-
-        if let since = since {
-            path += "?since=\(since)"
-        }
-
-        return try await getPaginated(path: path)
+        // No messaging endpoint in v1 API — return empty for now
+        print("⚠️ [API] Messaging not available in v1 API — returning empty")
+        return []
     }
 
     func postMessage(transferId: Int, text: String, sender: String) async throws -> Message {
-        struct PostMessageRequest: Encodable {
-            let text: String
-            let sender: String
-        }
-        return try await post(path: "/transport/api/transfers/\(transferId)/messages", body: PostMessageRequest(text: text, sender: sender))
+        throw APIError.serverError("Messaging is not yet available in the v1 API")
     }
 
     func batchMessageCounts(transferIds: [Int]) async throws -> [Int: Int] {
-        struct BatchCountRequest: Encodable {
-            let transferIds: [Int]
-        }
-        return try await post(path: "/transport/api/messages/batch-counts", body: BatchCountRequest(transferIds: transferIds))
+        // No messaging endpoint in v1 API — return empty counts
+        return [:]
     }
 
     // MARK: - Tracking (Public)
@@ -655,7 +677,8 @@ class TransportAPIClient: ObservableObject {
     // MARK: - Action Log
 
     func listActionLog(actionType: String? = nil, page: Int? = nil, size: Int? = nil) async throws -> [ActionLog] {
-        var path = "/transport/api/action-log"
+        // MCP: GET /api/v1/transport/action-log
+        var path = "/api/v1/transport/action-log"
         var components = URLComponents()
 
         var queryItems: [URLQueryItem] = []
@@ -674,17 +697,18 @@ class TransportAPIClient: ObservableObject {
     }
 
     func getTransferActions(transferId: Int) async throws -> [ActionLog] {
-        try await getPaginated(path: "/transport/api/transfers/\(transferId)/actions")
+        // Action log by transfer — not a confirmed v1 endpoint; using action-log with filter
+        try await getPaginated(path: "/api/v1/transport/action-log?transferId=\(transferId)")
     }
 
     // MARK: - Package Media
 
     func getPackageMedia(packageId: Int) async throws -> [PackageMedia] {
-        try await getPaginated(path: "/transport/api/packages/\(packageId)/media")
+        try await getPaginated(path: "/api/v1/transport/packages/\(packageId)/media")
     }
 
     func uploadPackageMedia(packageId: Int, imageData: Data, filename: String) async throws -> PackageMedia {
-        guard let url = URL(string: baseURL + "/transport/api/packages/\(packageId)/media") else {
+        guard let url = URL(string: baseURL + "/api/v1/transport/packages/\(packageId)/media") else {
             throw URLError(.badURL)
         }
 

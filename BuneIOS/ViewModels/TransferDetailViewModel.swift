@@ -36,13 +36,19 @@ class TransferDetailViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        async let transferTask = loadTransfer()
-        async let packagesTask = loadPackages()
-        async let messagesTask = loadMessages()
+        // Load transfer detail first — it includes inline packages
+        await loadTransfer()
 
-        await transferTask
-        await packagesTask
-        await messagesTask
+        // Use inline packages from transfer detail if available;
+        // only call the separate packages endpoint as a fallback
+        if let inlinePackages = transfer?.packages, !inlinePackages.isEmpty {
+            packages = inlinePackages
+            print("✅ [Detail] Using \(inlinePackages.count) inline packages from transfer detail")
+        } else {
+            await loadPackages()
+        }
+
+        await loadMessages()
 
         isLoading = false
     }
@@ -51,17 +57,23 @@ class TransferDetailViewModel: ObservableObject {
     private func loadTransfer() async {
         do {
             transfer = try await apiClient.getTransfer(id: transferId)
+            print("✅ [Detail] Transfer loaded: id=\(transferId), status=\(transfer?.status ?? "nil")")
         } catch {
+            print("❌ [Detail] Failed to load transfer \(transferId): \(error)")
             errorMessage = "Failed to load transfer: \(error.localizedDescription)"
         }
     }
 
-    // MARK: - Load Packages
+    // MARK: - Load Packages (fallback if not inline)
     private func loadPackages() async {
         do {
             packages = try await apiClient.getTransferPackages(transferId: transferId)
         } catch {
-            errorMessage = "Failed to load packages: \(error.localizedDescription)"
+            // Don't overwrite a transfer error; packages are secondary
+            if errorMessage == nil {
+                errorMessage = "Failed to load packages: \(error.localizedDescription)"
+            }
+            print("⚠️ [Detail] Packages endpoint failed (non-fatal if transfer has inline packages): \(error)")
         }
     }
 
