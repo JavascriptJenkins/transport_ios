@@ -23,6 +23,9 @@ struct TransferDetailView: View {
     @State private var isDuplicating = false
     @State private var duplicateError: String?
 
+    // Package photos sheet target.
+    @State private var photosPackageLabel: String?
+
     init(transferId: Int, apiClient: TransportAPIClient) {
         self.transferId = transferId
         self.apiClient = apiClient
@@ -211,24 +214,38 @@ struct TransferDetailView: View {
 
                                 VStack(spacing: 0) {
                                     ForEach(viewModel.packages, id: \.id) { package in
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            Text(package.packageLabel)
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundColor(BuneColors.accentPrimary)
+                                        HStack(alignment: .top, spacing: 12) {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text(package.packageLabel)
+                                                    .font(.system(.caption, design: .monospaced))
+                                                    .foregroundColor(BuneColors.accentPrimary)
 
-                                            if let productName = package.productName {
-                                                Text(productName)
-                                                    .font(.caption)
-                                                    .foregroundColor(BuneColors.textSecondary)
-                                            }
+                                                if let productName = package.productName {
+                                                    Text(productName)
+                                                        .font(.caption)
+                                                        .foregroundColor(BuneColors.textSecondary)
+                                                }
 
-                                            if let qty = package.shippedQuantity, let unit = package.shippedUnit {
-                                                Text("\(Int(qty)) \(unit)")
-                                                    .font(.caption2)
-                                                    .foregroundColor(BuneColors.textTertiary)
+                                                if let qty = package.shippedQuantity, let unit = package.shippedUnit {
+                                                    Text("\(Int(qty)) \(unit)")
+                                                        .font(.caption2)
+                                                        .foregroundColor(BuneColors.textTertiary)
+                                                }
                                             }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                                            Button {
+                                                photosPackageLabel = package.packageLabel
+                                            } label: {
+                                                Image(systemName: "camera.fill")
+                                                    .font(.system(size: 14))
+                                                    .foregroundColor(BuneColors.accentPrimary)
+                                                    .frame(width: 32, height: 32)
+                                                    .background(BuneColors.glassFill)
+                                                    .clipShape(Circle())
+                                            }
+                                            .accessibilityLabel("Photos for \(package.packageLabel)")
                                         }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.vertical, 8)
 
                                         if package.id != viewModel.packages.last?.id {
@@ -387,6 +404,18 @@ struct TransferDetailView: View {
         } message: {
             Text(duplicateError ?? "")
         }
+        .sheet(item: Binding(
+            get: { photosPackageLabel.map { PackageLabelWrapper(value: $0) } },
+            set: { photosPackageLabel = $0?.value }
+        )) { wrapper in
+            PackagePhotosSheet(packageLabel: wrapper.value, apiClient: apiClient)
+        }
+    }
+
+    // Tiny wrapper so a String can drive `sheet(item:)`, which requires Identifiable.
+    private struct PackageLabelWrapper: Identifiable {
+        let value: String
+        var id: String { value }
     }
 
     // MARK: - Duplicate as Session
