@@ -5,14 +5,16 @@
 	<key>NSCameraUsageDescription</key>
 	<string>BuneIOS needs camera access to scan METRC barcode tags on packages during pickup and delivery.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>BuneIOS needs your location to track transport routes and provide real-time delivery updates.</string>
+	<string>Your location is used to record pickup and delivery stops on active transport manifests and share live trip progress with the dispatcher.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>BuneIOS needs background location access to continuously track transport vehicles during active deliveries.</string>
+	<string>Background location is used only while a transport manifest is active, so dispatchers and regulators can verify the vehicle's route as required by METRC chain-of-custody rules. Tracking pauses automatically when the trip ends.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
 	</array>
 	<key>TRANSPORT_API_KEY</key>
 	<string>$(TRANSPORT_API_KEY)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
