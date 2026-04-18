@@ -21,8 +21,11 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
     private var apiClient: TransportAPIClient?
     private var activeTransferId: Int?
     private var activeVehicleId: Int?
-    private var pingTimer: Timer?
     private var pendingPings: [GPSPing] = []
+
+    /// Timestamp of the last ping sent (or queued) — used to gate callback-driven
+    /// submissions so we don't spam when CLLocationManager delivers frequently.
+    private var lastPingSubmittedAt: Date = .distantPast
 
     // Configuration
     var pingIntervalSeconds: TimeInterval = 30
@@ -55,40 +58,40 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
         self.activeVehicleId = vehicleId
         self.apiClient = apiClient
         self.isTracking = true
+        self.lastPingSubmittedAt = .distantPast
 
-        // Enable background location updates
+        // Upgrade to "Always" authorization so tracking keeps working when the
+        // driver puts the phone away during a trip. If the user has only
+        // granted WhenInUse, this is a no-op — iOS will continue delivering
+        // updates only while the app is in the foreground.
+        if authorizationStatus != .authorizedAlways {
+            locationManager.requestAlwaysAuthorization()
+        }
+
+        // Background modes capability is declared in Info.plist. These two
+        // properties are required for CLLocationManager to keep delivering
+        // updates when the app is backgrounded.
         locationManager.allowsBackgroundLocationUpdates = true
         locationManager.showsBackgroundLocationIndicator = true
 
-        // Start location updates
+        // Start continuous updates. Pings are driven off the resulting
+        // didUpdateLocations callbacks (throttled by pingIntervalSeconds),
+        // NOT a foreground Timer — timers stop firing once the app suspends.
         if hasPermission {
             locationManager.startUpdatingLocation()
+            // Significant-change service as a safety net: wakes us up if the
+            // OS suspends continuous delivery during long idle stretches.
+            locationManager.startMonitoringSignificantLocationChanges()
         }
-
-        // Start ping timer
-        startPingTimer()
     }
 
     func stopTracking() {
         self.isTracking = false
         locationManager.stopUpdatingLocation()
+        locationManager.stopMonitoringSignificantLocationChanges()
         locationManager.allowsBackgroundLocationUpdates = false
-        pingTimer?.invalidate()
-        pingTimer = nil
 
-        // Flush any pending pings before stopping
-        Task {
-            await flushPendingPings()
-        }
-    }
-
-    private func startPingTimer() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: pingIntervalSeconds, repeats: true) { [weak self] _ in
-            Task {
-                await self?.submitPing()
-            }
-        }
+        Task { await flushPendingPings() }
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -96,6 +99,17 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
         self.currentLocation = latest
+
+        // Drive pings from the delegate callback rather than a foreground
+        // Timer so the behavior survives app suspension. A 30s throttle
+        // (pingIntervalSeconds) prevents spamming when the driver is moving
+        // and CLLocationManager fires frequently.
+        guard isTracking else { return }
+        let now = Date()
+        if now.timeIntervalSince(lastPingSubmittedAt) >= pingIntervalSeconds {
+            lastPingSubmittedAt = now
+            Task { await submitPing() }
+        }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -192,11 +206,11 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
 
     func reducePingFrequency() {
         pingIntervalSeconds = 60
-        startPingTimer()
+        // Throttle gate in didUpdateLocations picks this up immediately;
+        // no timer to restart.
     }
 
     func normalPingFrequency() {
         pingIntervalSeconds = 30
-        startPingTimer()
     }
 }
