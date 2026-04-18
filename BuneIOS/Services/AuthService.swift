@@ -204,37 +204,48 @@ class AuthService: ObservableObject {
         saveTokens(access: tokenResponse.accessToken, refresh: refreshToken)
     }
 
-    // MARK: - Simple Token Persistence (UserDefaults for now, migrate to Keychain later)
+    // MARK: - Token Persistence
+    // Access + refresh tokens live in the Keychain (sensitive credentials).
+    // Roles are non-sensitive descriptive data and stay in UserDefaults.
     private let rolesKey = "com.buneios.userRoles"
 
     private func saveTokens(access: String, refresh: String?) {
-        UserDefaults.standard.set(access, forKey: accessTokenKey)
-        if let refresh = refresh {
-            UserDefaults.standard.set(refresh, forKey: refreshTokenKey)
-        }
-        // Save roles
+        KeychainStore.set(access, for: accessTokenKey)
+        KeychainStore.set(refresh, for: refreshTokenKey)
         UserDefaults.standard.set(userRoles, forKey: rolesKey)
     }
 
     private func loadStoredTokens() {
-        if let access = UserDefaults.standard.string(forKey: accessTokenKey) {
-            accessToken = access
-            refreshToken = UserDefaults.standard.string(forKey: refreshTokenKey)
-            isAuthenticated = true
-
-            // Load roles
-            let storedRoles = UserDefaults.standard.array(forKey: rolesKey) as? [String] ?? []
-            userRoles = storedRoles
-
-            // Recreate currentSession from stored data
-            let expiresAt: Date? = nil // Expiration is not persisted; would need separate storage
-            currentSession = UserSession(accessToken: access, refreshToken: refreshToken, roles: storedRoles, expiresAt: expiresAt)
+        // One-time migration: if legacy UserDefaults tokens exist, move them
+        // to the Keychain then clear the plaintext copy.
+        if let legacyAccess = UserDefaults.standard.string(forKey: accessTokenKey) {
+            let legacyRefresh = UserDefaults.standard.string(forKey: refreshTokenKey)
+            KeychainStore.set(legacyAccess, for: accessTokenKey)
+            KeychainStore.set(legacyRefresh, for: refreshTokenKey)
+            UserDefaults.standard.removeObject(forKey: accessTokenKey)
+            UserDefaults.standard.removeObject(forKey: refreshTokenKey)
         }
+
+        guard let access = KeychainStore.get(accessTokenKey) else { return }
+        accessToken = access
+        refreshToken = KeychainStore.get(refreshTokenKey)
+        isAuthenticated = true
+
+        let storedRoles = UserDefaults.standard.array(forKey: rolesKey) as? [String] ?? []
+        userRoles = storedRoles
+
+        // Expiration is not persisted; refreshAccessToken() handles 401s.
+        currentSession = UserSession(
+            accessToken: access,
+            refreshToken: refreshToken,
+            roles: storedRoles,
+            expiresAt: nil
+        )
     }
 
     private func clearStoredTokens() {
-        UserDefaults.standard.removeObject(forKey: accessTokenKey)
-        UserDefaults.standard.removeObject(forKey: refreshTokenKey)
+        KeychainStore.delete(account: accessTokenKey)
+        KeychainStore.delete(account: refreshTokenKey)
         UserDefaults.standard.removeObject(forKey: rolesKey)
     }
 
