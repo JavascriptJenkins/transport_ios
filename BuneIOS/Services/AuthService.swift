@@ -24,19 +24,54 @@ class AuthService: ObservableObject {
     // MARK: - Session & Role Management
     @Published var currentSession: UserSession?
     @Published private(set) var userRoles: [String] = []
-    static let apiKey = Config.apiKey
 
-    // MARK: - Configuration
-    /// Token endpoint from the OAuth2 password grant guide. Derived from Config.transportBaseURL.
-    private var tokenURL: String { Config.tokenURL }
+    // MARK: - Tenant Selection
+    /// Active tenant for this session. When nil in multi-tenant mode, LoginView
+    /// shows the tenant picker before the credentials form.
+    @Published var selectedTenant: Tenant?
 
-    // Keychain keys
+    /// Full list of configured tenants from Config.xcconfig.
+    var availableTenants: [Tenant] { Config.tenants }
+
+    /// True when Config.xcconfig declares one or more tenants.
+    var isMultiTenant: Bool { !Config.tenants.isEmpty }
+
+    /// API key to send with transport requests — tenant-specific when selected,
+    /// otherwise falls back to the legacy single-tenant key.
+    var apiKey: String { selectedTenant?.apiKey ?? Config.apiKey }
+
+    /// Token endpoint for the active tenant, or the legacy fallback.
+    private var tokenURL: String { selectedTenant?.tokenURL ?? Config.tokenURL }
+
+    // Storage keys
     private let accessTokenKey = "com.buneios.accessToken"
     private let refreshTokenKey = "com.buneios.refreshToken"
+    private let selectedTenantKey = "com.buneios.selectedTenant"
 
     // MARK: - Init
     init() {
+        loadStoredTenant()
         loadStoredTokens()
+    }
+
+    // MARK: - Tenant Management
+    func selectTenant(_ tenant: Tenant) {
+        selectedTenant = tenant
+        UserDefaults.standard.set(tenant.id, forKey: selectedTenantKey)
+    }
+
+    /// Clear tenant selection (used when user wants to switch tenants).
+    /// Also clears credentials since they were scoped to the old tenant.
+    func clearTenantAndLogout() {
+        UserDefaults.standard.removeObject(forKey: selectedTenantKey)
+        selectedTenant = nil
+        logout()
+    }
+
+    private func loadStoredTenant() {
+        if let id = UserDefaults.standard.string(forKey: selectedTenantKey) {
+            selectedTenant = Config.tenant(matching: id)
+        }
     }
 
     // MARK: - Login
@@ -208,7 +243,7 @@ class AuthService: ObservableObject {
 
     func authorizedTransportRequest(for url: URL) -> URLRequest {
         var request = authorizedRequest(for: url)
-        request.setValue(Self.apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         return request
     }
 }

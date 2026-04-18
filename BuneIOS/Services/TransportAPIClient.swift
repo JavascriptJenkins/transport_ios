@@ -80,8 +80,15 @@ struct EmptyData: Codable {}
 @MainActor
 class TransportAPIClient: ObservableObject {
 
-    private let baseURL = Config.transportBaseURL
-    private let apiKey = Config.apiKey
+    /// Base URL for the selected tenant, resolved dynamically per request.
+    /// Falls back to the legacy single-tenant value when no tenant is selected.
+    private var baseURL: String {
+        authService.selectedTenant?.baseURL ?? Config.transportBaseURL
+    }
+
+    /// API key for the selected tenant, resolved per request.
+    private var apiKey: String { authService.apiKey }
+
     private let authService: AuthService
 
     init(authService: AuthService) {

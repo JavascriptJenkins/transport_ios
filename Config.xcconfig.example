@@ -4,5 +4,13 @@
 // NOTE: xcconfig treats `//` as a comment. For any URL value, use $()
 // to break up the double-slash, e.g.  https:/$()/host.example.com
 
+// ---- Multi-tenant setup (preferred) ----
+// Comma-separated tenants. Format: tenantName:apiKey
+// Tenant name becomes the subdomain of TRANSPORT_HOST_SUFFIX,
+// e.g. "haven" + "bunepos.com" → https://haven.bunepos.com
+TRANSPORT_TENANTS = haven:tvvs_key_for_haven,acme:tvvs_key_for_acme
+TRANSPORT_HOST_SUFFIX = bunepos.com
+
+// ---- Single-tenant fallback (used only when TRANSPORT_TENANTS is empty) ----
 TRANSPORT_API_KEY = your_api_key_here
 TRANSPORT_BASE_URL = https:/$()/haven.bunepos.com
