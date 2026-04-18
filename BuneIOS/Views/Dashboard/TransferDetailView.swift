@@ -13,6 +13,11 @@ struct TransferDetailView: View {
     let transferId: Int
     let apiClient: TransportAPIClient
 
+    // Share-sheet plumbing for the manifest PDF.
+    @State private var manifestShareURL: URL?
+    @State private var isDownloadingManifest = false
+    @State private var manifestError: String?
+
     init(transferId: Int, apiClient: TransportAPIClient) {
         self.transferId = transferId
         self.apiClient = apiClient
@@ -320,6 +325,55 @@ struct TransferDetailView: View {
         }
         .navigationTitle("Transfer Details")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    Task { await downloadManifest() }
+                } label: {
+                    if isDownloadingManifest {
+                        ProgressView().tint(BuneColors.textPrimary)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                .disabled(isDownloadingManifest || viewModel.transfer == nil)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { manifestShareURL != nil },
+            set: { if !$0 { manifestShareURL = nil } }
+        )) {
+            if let url = manifestShareURL {
+                ShareSheet(items: [url])
+            }
+        }
+        .alert("Manifest Download Failed", isPresented: Binding(
+            get: { manifestError != nil },
+            set: { if !$0 { manifestError = nil } }
+        )) {
+            Button("OK", role: .cancel) { manifestError = nil }
+        } message: {
+            Text(manifestError ?? "")
+        }
+    }
+
+    // MARK: - Manifest PDF
+    @MainActor
+    private func downloadManifest() async {
+        guard !isDownloadingManifest else { return }
+        isDownloadingManifest = true
+        defer { isDownloadingManifest = false }
+
+        do {
+            let data = try await apiClient.downloadManifestPDF(transferId: transferId)
+            let manifestNumber = viewModel.transfer?.manifestNumber ?? "manifest-\(transferId)"
+            let filename = "\(manifestNumber).pdf"
+            let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try data.write(to: tmpURL, options: .atomic)
+            manifestShareURL = tmpURL
+        } catch {
+            manifestError = "Could not download manifest: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Helper Functions
