@@ -42,8 +42,16 @@ struct RouteMapView: View {
                         .stroke(BuneColors.accentPrimary, lineWidth: 3)
                 }
 
-                // Vehicle location history trail (breadcrumb dots)
-                ForEach(Array(locationHistory.enumerated()), id: \.offset) { index, coord in
+                // Vehicle location history trail — dashed polyline connecting
+                // the ping points, plus a small marker at each ping.
+                if locationHistory.count >= 2 {
+                    MapPolyline(coordinates: locationHistory)
+                        .stroke(
+                            BuneColors.accentPrimary.opacity(0.6),
+                            style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 4])
+                        )
+                }
+                ForEach(Array(locationHistory.enumerated()), id: \.offset) { _, coord in
                     Annotation("", coordinate: coord, anchor: .center) {
                         Circle()
                             .fill(BuneColors.accentPrimary.opacity(0.4))

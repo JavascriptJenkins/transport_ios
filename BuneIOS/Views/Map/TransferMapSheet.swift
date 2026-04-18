@@ -2,8 +2,6 @@
 //  TransferMapSheet.swift
 //  BuneIOS
 //
-//  Created by techvvs001 on 4/6/26.
-//
 
 import SwiftUI
 import MapKit
@@ -11,23 +9,34 @@ import MapKit
 struct TransferMapSheet: View {
     let transfer: Transfer
     let route: Route?
+    let apiClient: TransportAPIClient?
+    /// Vehicle id for GPS-history polling. Not currently a field on Transfer
+    /// from the backend, so callers must resolve it (e.g. by matching
+    /// vehiclePlate against the vehicles list) and pass it in.
+    let vehicleId: Int?
 
-    @StateObject private var locationTracker = LocationTrackingService()
+    @StateObject private var tracker = VehicleBreadcrumbTracker()
     @Environment(\.dismiss) var dismiss
+
+    /// Convenience init for previews / call sites without live GPS polling.
+    init(transfer: Transfer, route: Route?, apiClient: TransportAPIClient? = nil, vehicleId: Int? = nil) {
+        self.transfer = transfer
+        self.route = route
+        self.apiClient = apiClient
+        self.vehicleId = vehicleId
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Map takes most of the space
                 RouteMapView(
                     route: route,
                     stops: route?.stops ?? [],
-                    vehicleLocation: currentVehicleCoord,
-                    locationHistory: locationTracker.locationHistory
+                    vehicleLocation: tracker.currentLocation,
+                    locationHistory: tracker.locationHistory
                 )
                 .frame(maxHeight: .infinity)
 
-                // Bottom panel: glass card with route info
                 bottomInfoPanel
                     .background(BuneColors.backgroundSecondary)
             }
@@ -35,18 +44,18 @@ struct TransferMapSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                    .foregroundColor(BuneColors.accentPrimary)
+                    Button("Close") { dismiss() }
+                        .foregroundColor(BuneColors.accentPrimary)
                 }
             }
         }
-        .onAppear {
-            locationTracker.startTracking(transferId: transfer.id)
+        .task {
+            if let client = apiClient, let vid = vehicleId {
+                await tracker.start(apiClient: client, vehicleId: vid)
+            }
         }
         .onDisappear {
-            locationTracker.stopTracking()
+            tracker.stop()
         }
     }
 
@@ -73,11 +82,15 @@ struct TransferMapSheet: View {
                                     .font(.caption)
                                     .foregroundColor(BuneColors.statusInTransit)
                             }
+
+                            Label("\(tracker.locationHistory.count) pings",
+                                  systemImage: "location.circle.fill")
+                                .font(.caption)
+                                .foregroundColor(BuneColors.textTertiary)
                         }
                     }
                     Spacer()
 
-                    // Distance/Time badge (if available)
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("In Transit")
                             .font(.caption2)
@@ -92,23 +105,19 @@ struct TransferMapSheet: View {
                 .cornerRadius(12)
             }
 
-            // Stop list (compact)
             if let stops = route?.stops, !stops.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(stops) { stop in
                         HStack(spacing: 12) {
-                            // Stop number circle
                             ZStack {
                                 Circle()
                                     .fill(BuneColors.accentPrimary.opacity(0.2))
                                     .frame(width: 28, height: 28)
-
                                 Text("\(stop.stopOrder)")
                                     .font(.system(size: 12, weight: .bold))
                                     .foregroundColor(BuneColors.accentPrimary)
                             }
 
-                            // Stop info
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(stop.name ?? "Stop \(stop.stopOrder)")
                                     .font(.system(size: 13, weight: .medium))
@@ -125,7 +134,6 @@ struct TransferMapSheet: View {
 
                             Spacer()
 
-                            // ETA offset
                             if let estimatedMinutes = stop.estimatedMinutes {
                                 VStack(alignment: .trailing, spacing: 1) {
                                     Text("\(estimatedMinutes)m")
@@ -148,18 +156,11 @@ struct TransferMapSheet: View {
         .padding()
     }
 
-    private var currentVehicleCoord: CLLocationCoordinate2D? {
-        locationTracker.currentLocation.map { location in
-            CLLocationCoordinate2D(latitude: location.latitude, longitude: location.longitude)
-        }
-    }
-
     private func formatETA(_ dateString: String) -> String? {
         let formatter = ISO8601DateFormatter()
         guard let date = formatter.date(from: dateString) else { return nil }
 
-        let now = Date()
-        let interval = date.timeIntervalSince(now)
+        let interval = date.timeIntervalSince(Date())
 
         if interval < 60 {
             return "Now"
@@ -174,21 +175,52 @@ struct TransferMapSheet: View {
     }
 }
 
-// MARK: - LocationTrackingService (Mock)
-class LocationTrackingService: NSObject, ObservableObject {
-    @Published var currentLocation: (latitude: Double, longitude: Double)?
+// MARK: - Vehicle Breadcrumb Tracker
+//
+// Polls `GET /transport/api/vehicles/{id}/pings` every 15 seconds while the
+// map sheet is visible, exposing the history as CLLocationCoordinate2D
+// points for RouteMapView to render as a trail.
+
+@MainActor
+class VehicleBreadcrumbTracker: ObservableObject {
     @Published var locationHistory: [CLLocationCoordinate2D] = []
+    @Published var currentLocation: CLLocationCoordinate2D?
 
-    private var isTracking = false
+    private var pollingTask: Task<Void, Never>?
+    private var apiClient: TransportAPIClient?
+    private var vehicleId: Int?
 
-    func startTracking(transferId: Int) {
-        isTracking = true
-        // In production, this would integrate with GPSTrackingService
-        // For now, it's a placeholder that can be connected to the real service
+    func start(apiClient: TransportAPIClient, vehicleId: Int) async {
+        self.apiClient = apiClient
+        self.vehicleId = vehicleId
+        await refresh()
+        pollingTask?.cancel()
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                if Task.isCancelled { break }
+                await self?.refresh()
+            }
+        }
     }
 
-    func stopTracking() {
-        isTracking = false
+    func stop() {
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
+
+    private func refresh() async {
+        guard let apiClient = apiClient, let vehicleId = vehicleId else { return }
+        do {
+            let pings = try await apiClient.getVehicleHistory(vehicleId: vehicleId)
+            let coords = pings.map {
+                CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+            }
+            locationHistory = coords
+            currentLocation = coords.last
+        } catch {
+            // Silent failure — leave existing trail visible rather than clearing on a network blip.
+        }
     }
 }
 
@@ -214,59 +246,21 @@ class LocationTrackingService: NSObject, ObservableObject {
     )
 
     let mockStops = [
-        RouteStop(
-            id: 1,
-            stopOrder: 1,
-            name: "Pickup Point A",
-            lat: 37.7749,
-            lon: -122.4194,
-            address: "123 Main St, SF",
-            stopType: "pickup",
-            estimatedMinutes: 5,
-            createdAt: nil
-        ),
-        RouteStop(
-            id: 2,
-            stopOrder: 2,
-            name: "Distribution Hub",
-            lat: 37.7849,
-            lon: -122.4294,
-            address: "456 Oak Ave, SF",
-            stopType: "hub",
-            estimatedMinutes: 20,
-            createdAt: nil
-        ),
-        RouteStop(
-            id: 3,
-            stopOrder: 3,
-            name: "Final Delivery",
-            lat: 37.7949,
-            lon: -122.4394,
-            address: "789 Pine Rd, SF",
-            stopType: "delivery",
-            estimatedMinutes: 35,
-            createdAt: nil
-        )
+        RouteStop(id: 1, stopOrder: 1, name: "Pickup Point A", lat: 37.7749, lon: -122.4194,
+                  address: "123 Main St, SF", stopType: "pickup", estimatedMinutes: 5, createdAt: nil),
+        RouteStop(id: 2, stopOrder: 2, name: "Distribution Hub", lat: 37.7849, lon: -122.4294,
+                  address: "456 Oak Ave, SF", stopType: "hub", estimatedMinutes: 20, createdAt: nil),
+        RouteStop(id: 3, stopOrder: 3, name: "Final Delivery", lat: 37.7949, lon: -122.4394,
+                  address: "789 Pine Rd, SF", stopType: "delivery", estimatedMinutes: 35, createdAt: nil)
     ]
 
     let mockRoute = Route(
-        id: 1,
-        name: "Route SF-001",
-        description: "Downtown SF delivery route",
-        originAddress: "123 Main St, SF",
-        originLat: 37.7749,
-        originLon: -122.4194,
-        destinationAddress: "789 Pine Rd, SF",
-        destinationLat: 37.7949,
-        destinationLon: -122.4394,
-        geofencePolygonJson: nil,
-        routePolylineJson: nil,
-        bufferMeters: 100,
-        status: "IN_TRANSIT",
-        stops: mockStops,
-        createdAt: nil,
-        updatedAt: nil
+        id: 1, name: "Route SF-001", description: "Downtown SF delivery route",
+        originAddress: "123 Main St, SF", originLat: 37.7749, originLon: -122.4194,
+        destinationAddress: "789 Pine Rd, SF", destinationLat: 37.7949, destinationLon: -122.4394,
+        geofencePolygonJson: nil, routePolylineJson: nil, bufferMeters: 100,
+        status: "IN_TRANSIT", stops: mockStops, createdAt: nil, updatedAt: nil
     )
 
-    TransferMapSheet(transfer: mockTransfer, route: mockRoute)
+    TransferMapSheet(transfer: mockTransfer, route: mockRoute, apiClient: nil)
 }
