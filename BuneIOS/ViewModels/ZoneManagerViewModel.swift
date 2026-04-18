@@ -17,6 +17,10 @@ class ZoneManagerViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
+    /// Zones are scoped to a location (warehouse/hub) on the backend. The caller
+    /// sets this (typically the user's current facility license) before loading.
+    @Published var locationId: Int?
+
     private let apiClient: TransportAPIClient
 
     init(apiClient: TransportAPIClient) {
@@ -26,12 +30,16 @@ class ZoneManagerViewModel: ObservableObject {
     // MARK: - Load Zones
 
     func loadZones() async {
+        guard let locationId = locationId else {
+            errorMessage = "No location selected — cannot load zones."
+            return
+        }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
         do {
-            zones = try await apiClient.listZones()
+            zones = try await apiClient.listZones(locationId: locationId)
         } catch {
             errorMessage = "Failed to load zones: \(error.localizedDescription)"
         }

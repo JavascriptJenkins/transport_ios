@@ -513,8 +513,10 @@ class TransportAPIClient: ObservableObject {
         try await post(path: "/api/v1/transport/gps-ping", body: ping)
     }
 
+    /// GPS history for a vehicle — backend path is `/transport/api/vehicles/{id}/pings`
+    /// (served by TransportDashboardController). Returns a chronological list of pings.
     func getVehicleHistory(vehicleId: Int, from: String? = nil, to: String? = nil) async throws -> [GPSPing] {
-        var path = "/api/v1/transport/gps/vehicles/\(vehicleId)/history"
+        var path = "/transport/api/vehicles/\(vehicleId)/pings"
         var components = URLComponents()
 
         var queryItems: [URLQueryItem] = []
@@ -531,8 +533,10 @@ class TransportAPIClient: ObservableObject {
         return try await get(path: path)
     }
 
-    func getVehicleLatest(vehicleId: Int) async throws -> GPSPing {
-        try await get(path: "/api/v1/transport/gps/vehicles/\(vehicleId)/latest")
+    /// Latest known position for a vehicle: last element of the pings history.
+    func getVehicleLatest(vehicleId: Int) async throws -> GPSPing? {
+        let history = try await getVehicleHistory(vehicleId: vehicleId)
+        return history.last
     }
 
     func trackTransfer(transferId: Int) async throws -> TrackingEvent {
@@ -571,18 +575,24 @@ class TransportAPIClient: ObservableObject {
         return try await getRoute(id: routeId)
     }
 
+    /// Geofence settings live in the Route entity itself; backend expects them
+    /// inside the PUT /routes/{id} body (fields: geofencePolygonJson, bufferMeters).
+    /// Callers should use `updateRoute` / the generic route PUT instead of a
+    /// dedicated geofence endpoint — there is no `/routes/{id}/geofence` route.
+    @available(*, deprecated, message: "No separate endpoint — include geofence fields in PUT /routes/{id}")
     func setGeofence(routeId: Int, config: GeofenceConfig) async throws -> Route {
-        return try await post(path: "/api/v1/transport/routes/\(routeId)/geofence", body: config)
+        return try await post(path: "/api/v1/transport/routes/\(routeId)", body: config)
     }
 
     // MARK: - Zones
+    //
+    // Real backend paths live under `/transport/api/...` (ZoneController), NOT
+    // `/api/v1/transport/zones`. Also: there is no flat list endpoint — zones
+    // are scoped to a location (warehouse/hub).
 
-    func listZones() async throws -> [Zone] {
-        try await getPaginated(path: "/api/v1/transport/zones")
-    }
-
-    func getZone(id: Int) async throws -> Zone {
-        try await get(path: "/api/v1/transport/zones/\(id)")
+    /// List zones in a location. Backend: GET /transport/api/location/{locationId}/zones.
+    func listZones(locationId: Int) async throws -> [Zone] {
+        try await get(path: "/transport/api/location/\(locationId)/zones")
     }
 
     func scanIntoZone(zoneId: Int, packageLabel: String, action: String) async throws -> Package {
@@ -590,34 +600,40 @@ class TransportAPIClient: ObservableObject {
             let packageLabel: String
             let action: String
         }
-        return try await post(path: "/api/v1/transport/zones/\(zoneId)/scan", body: ScanRequest(packageLabel: packageLabel, action: action))
+        return try await post(path: "/transport/api/zones/\(zoneId)/scan", body: ScanRequest(packageLabel: packageLabel, action: action))
     }
 
     func getZonePackages(zoneId: Int) async throws -> [Package] {
-        try await getPaginated(path: "/api/v1/transport/zones/\(zoneId)/packages")
+        try await get(path: "/transport/api/zones/\(zoneId)/packages")
     }
 
     func getZoneAudit(zoneId: Int) async throws -> [ZoneScanAudit] {
-        try await getPaginated(path: "/api/v1/transport/zones/\(zoneId)/audit")
+        try await get(path: "/transport/api/zones/\(zoneId)/audit")
     }
 
     // MARK: - Totes
+    //
+    // Real backend paths live under `/transport/tote/api/...` (ToteController).
 
-    func listTotes() async throws -> [Tote] {
-        try await getPaginated(path: "/api/v1/transport/totes")
+    /// List totes for a transfer. Backend: GET /transport/tote/api/transfer/{transferId}/totes.
+    func listTotes(transferId: Int) async throws -> [Tote] {
+        try await get(path: "/transport/tote/api/transfer/\(transferId)/totes")
     }
 
+    /// Add a package to a tote by scanning. Backend: POST /transport/tote/api/totes/{id}/scan.
     func addPackageToTote(toteId: Int, packageLabel: String) async throws -> Tote {
         struct AddPackageRequest: Encodable {
             let packageLabel: String
         }
-        return try await post(path: "/api/v1/transport/totes/\(toteId)/packages", body: AddPackageRequest(packageLabel: packageLabel))
+        return try await post(path: "/transport/tote/api/totes/\(toteId)/scan", body: AddPackageRequest(packageLabel: packageLabel))
     }
 
-    @discardableResult
-    func removePackageFromTote(toteId: Int, packageId: Int) async throws -> Tote {
-        try await delete(path: "/api/v1/transport/totes/\(toteId)/packages/\(packageId)")
-        return try await get(path: "/api/v1/transport/totes/\(toteId)")
+    func getTotePackages(toteId: Int) async throws -> [Package] {
+        try await get(path: "/transport/tote/api/totes/\(toteId)/packages")
+    }
+
+    func getTote(toteId: Int) async throws -> Tote {
+        try await get(path: "/transport/tote/api/totes/\(toteId)")
     }
 
     // MARK: - Reference Data
@@ -640,25 +656,6 @@ class TransportAPIClient: ObservableObject {
 
     func listTransferTypes() async throws -> [TransferType] {
         try await getPaginated(path: "/api/v1/transport/transfer-types")
-    }
-
-    // MARK: - Chat/Messaging
-    // NOTE: Messaging endpoints do NOT exist in the v1 API yet.
-    // These are placeholder stubs that return empty results to avoid 404 errors.
-
-    func loadMessages(transferId: Int, since: String? = nil) async throws -> [Message] {
-        // No messaging endpoint in v1 API — return empty for now
-        print("⚠️ [API] Messaging not available in v1 API — returning empty")
-        return []
-    }
-
-    func postMessage(transferId: Int, text: String, sender: String) async throws -> Message {
-        throw APIError.serverError("Messaging is not yet available in the v1 API")
-    }
-
-    func batchMessageCounts(transferIds: [Int]) async throws -> [Int: Int] {
-        // No messaging endpoint in v1 API — return empty counts
-        return [:]
     }
 
     // MARK: - Tracking (Public)
@@ -711,13 +708,18 @@ class TransportAPIClient: ObservableObject {
     }
 
     // MARK: - Package Media
+    //
+    // Backend PackageMediaController lives at /transport/pkg-media/**. Media is
+    // keyed by METRC package LABEL (string), not package id.
 
-    func getPackageMedia(packageId: Int) async throws -> [PackageMedia] {
-        try await getPaginated(path: "/api/v1/transport/packages/\(packageId)/media")
+    func getPackageMedia(packageLabel: String) async throws -> [PackageMedia] {
+        let encoded = packageLabel.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? packageLabel
+        return try await get(path: "/transport/pkg-media/api/\(encoded)/info")
     }
 
-    func uploadPackageMedia(packageId: Int, imageData: Data, filename: String) async throws -> PackageMedia {
-        guard let url = URL(string: baseURL + "/api/v1/transport/packages/\(packageId)/media") else {
+    func uploadPackageMedia(packageLabel: String, imageData: Data, filename: String) async throws -> PackageMedia {
+        let encoded = packageLabel.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? packageLabel
+        guard let url = URL(string: baseURL + "/transport/pkg-media/api/\(encoded)/upload") else {
             throw URLError(.badURL)
         }
 
@@ -752,5 +754,78 @@ class TransportAPIClient: ObservableObject {
             return mediaData
         }
         return try JSONDecoder().decode(PackageMedia.self, from: data)
+    }
+
+    // MARK: - Manifest PDF
+
+    /// Download the METRC manifest PDF for a transfer. Returns raw bytes suitable
+    /// for writing to disk / sharing via UIActivityViewController.
+    /// Backend: GET /transport/api/transfers/{id}/pdf.
+    func downloadManifestPDF(transferId: Int) async throws -> Data {
+        guard let url = URL(string: baseURL + "/transport/api/transfers/\(transferId)/pdf") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        if let token = authService.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+
+    // MARK: - Messaging (chat)
+    //
+    // Backend: POST /transport/api/messages/batch — used for both fetching and
+    // posting messages. Single source of truth for per-transfer threads.
+
+    func loadMessages(transferId: Int, since: String? = nil) async throws -> [ChatMessage] {
+        struct MessagesRequest: Encodable {
+            let transferIds: [Int]
+            let since: String?
+            let includeMessages: Bool
+        }
+        struct MessagesResponse: Decodable {
+            let messages: [Int: [ChatMessage]]?
+        }
+        let body = MessagesRequest(transferIds: [transferId], since: since, includeMessages: true)
+        let response: MessagesResponse = try await post(path: "/transport/api/messages/batch", body: body)
+        return response.messages?[transferId] ?? []
+    }
+
+    func postMessage(transferId: Int, text: String, sender: String) async throws -> ChatMessage {
+        struct PostMessageRequest: Encodable {
+            let transferId: Int
+            let message: String
+            let sender: String
+        }
+        return try await post(
+            path: "/transport/api/messages/batch",
+            body: PostMessageRequest(transferId: transferId, message: text, sender: sender)
+        )
+    }
+
+    /// Batched unread-message counts for the dashboard badge row. Backend
+    /// returns a map keyed by transferId.
+    func batchMessageCounts(transferIds: [Int]) async throws -> [Int: Int] {
+        guard !transferIds.isEmpty else { return [:] }
+        struct CountsRequest: Encodable {
+            let transferIds: [Int]
+            let includeMessages: Bool
+        }
+        struct CountsResponse: Decodable {
+            let counts: [String: Int]?
+        }
+        let body = CountsRequest(transferIds: transferIds, includeMessages: false)
+        let response: CountsResponse = try await post(path: "/transport/api/messages/batch", body: body)
+        var result: [Int: Int] = [:]
+        for (k, v) in response.counts ?? [:] {
+            if let id = Int(k) { result[id] = v }
+        }
+        return result
     }
 }
