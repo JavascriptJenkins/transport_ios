@@ -9,7 +9,7 @@ import CoreLocation
 import Foundation
 
 @MainActor
-class GPSTrackingService: NSObject, ObservableObject, CLLocationManagerDelegate {
+class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published var currentLocation: CLLocation?
     @Published var isTracking = false
     @Published var hasPermission = false

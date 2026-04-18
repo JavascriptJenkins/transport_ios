@@ -14,6 +14,7 @@ protocol BarcodeScannerDelegate: AnyObject {
     func barcodeScannerDidFail(_ error: Error)
 }
 
+@MainActor
 class BarcodeScannerService: NSObject, ObservableObject {
     @Published var scannedCode: String?
     @Published var isScanning = false
@@ -146,7 +147,8 @@ class BarcodeScannerService: NSObject, ObservableObject {
 
 // MARK: - AVCaptureMetadataOutputObjectsDelegate
 
-extension BarcodeScannerService: AVCaptureMetadataOutputObjectsDelegate {
+extension BarcodeScannerService: @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
+
     func metadataOutput(
         _ output: AVCaptureMetadataOutput,
         didOutput metadataObjects: [AVMetadataObject],
