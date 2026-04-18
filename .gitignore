@@ -28,5 +28,8 @@ Podfile.lock
 # Local secrets injected at build time via xcconfig — never commit
 Config.xcconfig
 
+# App Store Connect API credentials — never commit
+.env
+
 # macOS
 .DS_Store

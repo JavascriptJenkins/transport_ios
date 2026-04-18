@@ -18,9 +18,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Auto-load credentials from .env if present (gitignored).
+if [ -f .env ]; then
+    set -a; . ./.env; set +a
+fi
+
 : "${ASC_API_KEY_ID:?missing — get from App Store Connect → Users & Access → Integrations}"
 : "${ASC_API_ISSUER_ID:?missing — header of the Keys tab in App Store Connect}"
 : "${ASC_API_KEY_PATH:?missing — path to AuthKey_<KeyID>.p8}"
+# Expand $HOME / ~ if they appear literally inside .env
+ASC_API_KEY_PATH=$(eval echo "$ASC_API_KEY_PATH")
 [ -f "$ASC_API_KEY_PATH" ] || { echo "key file not found: $ASC_API_KEY_PATH" >&2; exit 1; }
 
 PROJECT="BuneIOS.xcodeproj"
