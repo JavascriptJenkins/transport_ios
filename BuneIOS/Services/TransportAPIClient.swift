@@ -80,7 +80,7 @@ struct EmptyData: Codable {}
 @MainActor
 class TransportAPIClient: ObservableObject {
 
-    private let baseURL = "https://haven.bunepos.com"
+    private let baseURL = Config.transportBaseURL
     private let apiKey = Config.apiKey
     private let authService: AuthService
 

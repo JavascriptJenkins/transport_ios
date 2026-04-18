@@ -165,8 +165,8 @@ class DeliveryScanViewModel: ObservableObject {
 
             // Store receipt (in a real app, this would come from the API response)
             deliveryReceipt = DeliveryReceipt(
-                receiptUrl: "https://haven.bunepos.com/receipts/\(session.sessionId)",
-                qrCodeUrl: "https://haven.bunepos.com/qr/\(session.sessionId)"
+                receiptUrl: "\(Config.transportBaseURL)/receipts/\(session.sessionId)",
+                qrCodeUrl: "\(Config.transportBaseURL)/qr/\(session.sessionId)"
             )
 
             currentPhase = .complete

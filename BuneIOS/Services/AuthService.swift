@@ -27,8 +27,8 @@ class AuthService: ObservableObject {
     static let apiKey = Config.apiKey
 
     // MARK: - Configuration
-    /// Token endpoint from the OAuth2 password grant guide
-    private let tokenURL = "https://haven.bunepos.com/oauth2/token"
+    /// Token endpoint from the OAuth2 password grant guide. Derived from Config.transportBaseURL.
+    private var tokenURL: String { Config.tokenURL }
 
     // Keychain keys
     private let accessTokenKey = "com.buneios.accessToken"

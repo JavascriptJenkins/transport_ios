@@ -2,7 +2,7 @@
 //  Config.swift
 //  BuneIOS
 //
-//  Reads build-time secrets injected via Config.xcconfig → Info.plist.
+//  Reads build-time config injected via Config.xcconfig → Info.plist.
 //  Never hardcode secrets in source — set them in Config.xcconfig (gitignored).
 //
 
@@ -21,6 +21,16 @@ enum Config {
         return value
     }()
 
-    static let transportBaseURL = "https://haven.bunepos.com"
-    static let tokenURL = "https://haven.bunepos.com/oauth2/token"
+    static let transportBaseURL: String = {
+        guard
+            let value = Bundle.main.object(forInfoDictionaryKey: "TRANSPORT_BASE_URL") as? String,
+            !value.isEmpty
+        else {
+            assertionFailure("TRANSPORT_BASE_URL is missing. Set it in Config.xcconfig.")
+            return "https://haven.bunepos.com"
+        }
+        return value.hasSuffix("/") ? String(value.dropLast()) : value
+    }()
+
+    static var tokenURL: String { "\(transportBaseURL)/oauth2/token" }
 }
