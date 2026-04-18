@@ -18,6 +18,11 @@ struct TransferDetailView: View {
     @State private var isDownloadingManifest = false
     @State private var manifestError: String?
 
+    // Duplicate-as-session flow.
+    @State private var duplicatedSessionUuid: String?
+    @State private var isDuplicating = false
+    @State private var duplicateError: String?
+
     init(transferId: Int, apiClient: TransportAPIClient) {
         self.transferId = transferId
         self.apiClient = apiClient
@@ -327,16 +332,27 @@ struct TransferDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task { await downloadManifest() }
+                Menu {
+                    Button {
+                        Task { await downloadManifest() }
+                    } label: {
+                        Label("Share Manifest PDF", systemImage: "doc.text")
+                    }
+                    .disabled(isDownloadingManifest || viewModel.transfer == nil)
+
+                    Button {
+                        Task { await duplicateAsSession() }
+                    } label: {
+                        Label("Duplicate as New Manifest", systemImage: "square.on.square")
+                    }
+                    .disabled(isDuplicating || viewModel.transfer == nil)
                 } label: {
-                    if isDownloadingManifest {
+                    if isDownloadingManifest || isDuplicating {
                         ProgressView().tint(BuneColors.textPrimary)
                     } else {
-                        Image(systemName: "square.and.arrow.up")
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
-                .disabled(isDownloadingManifest || viewModel.transfer == nil)
             }
         }
         .sheet(isPresented: Binding(
@@ -354,6 +370,37 @@ struct TransferDetailView: View {
             Button("OK", role: .cancel) { manifestError = nil }
         } message: {
             Text(manifestError ?? "")
+        }
+        .alert("Manifest Duplicated", isPresented: Binding(
+            get: { duplicatedSessionUuid != nil },
+            set: { if !$0 { duplicatedSessionUuid = nil } }
+        )) {
+            Button("OK", role: .cancel) { duplicatedSessionUuid = nil }
+        } message: {
+            Text("A new draft manifest has been created from this transfer. Open the Create tab to finish configuring and submit it.")
+        }
+        .alert("Duplicate Failed", isPresented: Binding(
+            get: { duplicateError != nil },
+            set: { if !$0 { duplicateError = nil } }
+        )) {
+            Button("OK", role: .cancel) { duplicateError = nil }
+        } message: {
+            Text(duplicateError ?? "")
+        }
+    }
+
+    // MARK: - Duplicate as Session
+    @MainActor
+    private func duplicateAsSession() async {
+        guard !isDuplicating else { return }
+        isDuplicating = true
+        defer { isDuplicating = false }
+
+        do {
+            let session = try await apiClient.duplicateTransferAsSession(transferId: transferId)
+            duplicatedSessionUuid = session.sessionUuid
+        } catch {
+            duplicateError = "Could not duplicate manifest: \(error.localizedDescription)"
         }
     }
 

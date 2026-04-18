@@ -756,6 +756,19 @@ class TransportAPIClient: ObservableObject {
         return try JSONDecoder().decode(PackageMedia.self, from: data)
     }
 
+    // MARK: - Session from Template (duplicate transfer)
+
+    /// Create a new editable session seeded from an existing transfer's
+    /// shipper/recipient/vehicle/driver fields + full package list.
+    /// Backend: POST /transport/api/sessions/from-template/{transferId}.
+    @discardableResult
+    func duplicateTransferAsSession(transferId: Int) async throws -> TransportSession {
+        return try await post(
+            path: "/transport/api/sessions/from-template/\(transferId)",
+            body: nil
+        )
+    }
+
     // MARK: - Manifest PDF
 
     /// Download the METRC manifest PDF for a transfer. Returns raw bytes suitable
