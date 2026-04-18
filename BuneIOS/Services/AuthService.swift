@@ -51,7 +51,15 @@ class AuthService: ObservableObject {
     // MARK: - Init
     init() {
         loadStoredTenant()
-        loadStoredTokens()
+        // In multi-tenant mode, don't resurrect tokens when no tenant is selected —
+        // they'd be orphans pointing at a tenant the user can no longer reach
+        // (e.g. the tenant was removed from TRANSPORT_TENANTS in a newer build).
+        // Clearing them forces the user through the tenant picker + login again.
+        if isMultiTenant && selectedTenant == nil {
+            clearStoredTokens()
+        } else {
+            loadStoredTokens()
+        }
     }
 
     // MARK: - Tenant Management
@@ -76,6 +84,13 @@ class AuthService: ObservableObject {
 
     // MARK: - Login
     func login(username: String, password: String) async {
+        // In multi-tenant mode, login requires a tenant. The UI gates this,
+        // but guard here too so we never accidentally hit the legacy fallback.
+        if isMultiTenant && selectedTenant == nil {
+            errorMessage = "Select a tenant before signing in."
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 

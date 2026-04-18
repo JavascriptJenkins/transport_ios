@@ -82,7 +82,9 @@ class TransportAPIClient: ObservableObject {
 
     /// Base URL for the selected tenant, resolved dynamically per request.
     /// Falls back to the legacy single-tenant value when no tenant is selected.
-    private var baseURL: String {
+    /// Exposed so callers (e.g. view models building receipt URLs) can stay
+    /// tenant-aware without re-implementing the fallback logic.
+    var baseURL: String {
         authService.selectedTenant?.baseURL ?? Config.transportBaseURL
     }
 
