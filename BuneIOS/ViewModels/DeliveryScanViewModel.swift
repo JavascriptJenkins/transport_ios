@@ -164,9 +164,10 @@ class DeliveryScanViewModel: ObservableObject {
             }
 
             // Store receipt (in a real app, this would come from the API response)
+            // Use the API client's resolved baseURL so we honor the selected tenant.
             deliveryReceipt = DeliveryReceipt(
-                receiptUrl: "\(Config.transportBaseURL)/receipts/\(session.sessionId)",
-                qrCodeUrl: "\(Config.transportBaseURL)/qr/\(session.sessionId)"
+                receiptUrl: "\(apiClient.baseURL)/receipts/\(session.sessionId)",
+                qrCodeUrl: "\(apiClient.baseURL)/qr/\(session.sessionId)"
             )
 
             currentPhase = .complete

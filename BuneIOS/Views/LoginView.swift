@@ -190,6 +190,11 @@ struct LoginView: View {
             text: $tenantInput,
             field: .tenant
         )
+        .onChange(of: tenantInput) { _, _ in
+            if tenantError != nil {
+                withAnimation { tenantError = nil }
+            }
+        }
 
         if let error = tenantError {
             Text(error)
