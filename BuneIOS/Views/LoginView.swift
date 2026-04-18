@@ -12,6 +12,8 @@ struct LoginView: View {
 
     @EnvironmentObject var authService: AuthService
 
+    @State private var tenantInput = ""
+    @State private var tenantError: String?
     @State private var username = ""
     @State private var password = ""
     @State private var showPassword = false
@@ -19,7 +21,13 @@ struct LoginView: View {
     @FocusState private var focusedField: Field?
 
     enum Field: Hashable {
-        case username, password
+        case tenant, username, password
+    }
+
+    /// True when we should show the tenant picker — i.e. multi-tenant mode
+    /// is active AND no tenant has been selected yet.
+    private var needsTenantSelection: Bool {
+        authService.isMultiTenant && authService.selectedTenant == nil
     }
 
     var body: some View {
@@ -127,52 +135,104 @@ struct LoginView: View {
                 .foregroundColor(.white)
                 .tracking(6)
 
-            Text("Sign in to continue")
-                .font(.subheadline)
-                .foregroundColor(Color.white.opacity(0.5))
+            if let tenant = authService.selectedTenant {
+                HStack(spacing: 8) {
+                    Text(tenant.displayName.uppercased())
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Color.white.opacity(0.7))
+                        .tracking(2)
+                    Button {
+                        authService.clearTenantAndLogout()
+                        tenantInput = ""
+                        username = ""
+                        password = ""
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.caption2)
+                            .foregroundColor(Color.white.opacity(0.45))
+                    }
+                }
+                Text("Sign in to continue")
+                    .font(.subheadline)
+                    .foregroundColor(Color.white.opacity(0.5))
+            } else if needsTenantSelection {
+                Text("Enter your tenant to continue")
+                    .font(.subheadline)
+                    .foregroundColor(Color.white.opacity(0.5))
+            } else {
+                Text("Sign in to continue")
+                    .font(.subheadline)
+                    .foregroundColor(Color.white.opacity(0.5))
+            }
         }
     }
 
     // MARK: - Glass Card
     private var glassCard: some View {
         VStack(spacing: 22) {
-            // Username field
-            glassTextField(
-                icon: "person.fill",
-                placeholder: "Username",
-                text: $username,
-                field: .username
-            )
-
-            // Password field
-            glassPasswordField
-
-            // Error message
-            if let error = authService.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(Color(red: 1.0, green: 0.4, blue: 0.4))
-                    .multilineTextAlignment(.center)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Login button
-            loginButton
-
-            // Divider
-            dividerRow
-
-            // Forgot password
-            Button {
-                // TODO: Implement forgot password flow
-            } label: {
-                Text("Forgot password?")
-                    .font(.footnote)
-                    .foregroundColor(Color.white.opacity(0.45))
+            if needsTenantSelection {
+                tenantCardContent
+            } else {
+                credentialsCardContent
             }
         }
         .padding(28)
         .background(glassBackground)
+    }
+
+    // MARK: - Tenant Card Content
+    @ViewBuilder
+    private var tenantCardContent: some View {
+        glassTextField(
+            icon: "building.2.fill",
+            placeholder: "Tenant name",
+            text: $tenantInput,
+            field: .tenant
+        )
+
+        if let error = tenantError {
+            Text(error)
+                .font(.caption)
+                .foregroundColor(Color(red: 1.0, green: 0.4, blue: 0.4))
+                .multilineTextAlignment(.center)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+
+        continueButton
+    }
+
+    // MARK: - Credentials Card Content
+    @ViewBuilder
+    private var credentialsCardContent: some View {
+        glassTextField(
+            icon: "person.fill",
+            placeholder: "Username",
+            text: $username,
+            field: .username
+        )
+
+        glassPasswordField
+
+        if let error = authService.errorMessage {
+            Text(error)
+                .font(.caption)
+                .foregroundColor(Color(red: 1.0, green: 0.4, blue: 0.4))
+                .multilineTextAlignment(.center)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+
+        loginButton
+
+        dividerRow
+
+        Button {
+            // TODO: Implement forgot password flow
+        } label: {
+            Text("Forgot password?")
+                .font(.footnote)
+                .foregroundColor(Color.white.opacity(0.45))
+        }
     }
 
     // MARK: - Glass Background
@@ -217,9 +277,12 @@ struct LoginView: View {
                 .focused($focusedField, equals: field)
                 .submitLabel(field == .username ? .next : .go)
                 .onSubmit {
-                    if field == .username {
+                    switch field {
+                    case .tenant:
+                        attemptTenantSelection()
+                    case .username:
                         focusedField = .password
-                    } else {
+                    case .password:
                         attemptLogin()
                     }
                 }
@@ -287,6 +350,35 @@ struct LoginView: View {
         )
     }
 
+    // MARK: - Continue Button (tenant step)
+    private var continueButton: some View {
+        Button(action: attemptTenantSelection) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.35, green: 0.25, blue: 0.65),
+                                Color(red: 0.25, green: 0.18, blue: 0.50)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 52)
+                    .shadow(color: Color(red: 0.3, green: 0.2, blue: 0.6).opacity(0.4), radius: 12, y: 6)
+
+                Text("Continue")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .tracking(1)
+            }
+        }
+        .disabled(tenantInput.trimmingCharacters(in: .whitespaces).isEmpty)
+        .opacity(tenantInput.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1.0)
+        .padding(.top, 4)
+    }
+
     // MARK: - Login Button
     private var loginButton: some View {
         Button(action: attemptLogin) {
@@ -342,6 +434,24 @@ struct LoginView: View {
         focusedField = nil
         Task {
             await authService.login(username: username, password: password)
+        }
+    }
+
+    // MARK: - Tenant Selection Action
+    private func attemptTenantSelection() {
+        let trimmed = tenantInput.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        guard let tenant = Config.tenant(matching: trimmed) else {
+            withAnimation {
+                tenantError = "Unknown tenant. Check the name and try again."
+            }
+            return
+        }
+        tenantError = nil
+        authService.selectTenant(tenant)
+        // After selection, jump focus to the username field on the next step.
+        DispatchQueue.main.async {
+            focusedField = .username
         }
     }
 }

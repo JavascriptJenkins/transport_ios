@@ -16,6 +16,10 @@
 	<string>$(TRANSPORT_API_KEY)</string>
 	<key>TRANSPORT_BASE_URL</key>
 	<string>$(TRANSPORT_BASE_URL)</string>
+	<key>TRANSPORT_TENANTS</key>
+	<string>$(TRANSPORT_TENANTS)</string>
+	<key>TRANSPORT_HOST_SUFFIX</key>
+	<string>$(TRANSPORT_HOST_SUFFIX)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
