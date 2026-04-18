@@ -33,6 +33,15 @@ struct ChatView: View {
         )
     }
 
+    /// Sender label matching the current user's role — determines which side
+    /// of the thread their messages appear on in both mobile and dashboard.
+    private var senderRole: String {
+        if authService.isDriver { return "driver" }
+        if authService.isAdmin || authService.isManager { return "admin" }
+        if authService.isClient { return "recipient" }
+        return "driver"
+    }
+
     var body: some View {
         ZStack {
             // Background
@@ -93,7 +102,7 @@ struct ChatView: View {
                 if !quickReplies.isEmpty {
                     QuickReplyChips(chips: quickReplies) { chip in
                         Task {
-                            await viewModel.sendMessage(chip)
+                            await viewModel.sendMessage(chip, sender: senderRole)
                             messageText = ""
                         }
                     }
@@ -109,7 +118,7 @@ struct ChatView: View {
 
                     Button(action: {
                         Task {
-                            await viewModel.sendMessage(messageText)
+                            await viewModel.sendMessage(messageText, sender: senderRole)
                             messageText = ""
                         }
                     }) {

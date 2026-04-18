@@ -117,14 +117,17 @@ class TransferDetailViewModel: ObservableObject {
     }
 
     // MARK: - Send Message
-    func sendMessage(_ text: String) async {
+    /// Post a message. Sender label is derived from the active user's role so
+    /// drivers, managers, and admins all show up on the correct side of the
+    /// thread on both web and mobile.
+    func sendMessage(_ text: String, sender: String = "driver") async {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
 
         do {
             let message: ChatMessage = try await apiClient.postMessage(
                 transferId: transferId,
                 text: text,
-                sender: "driver"
+                sender: sender
             )
             messages.append(message)
             lastMessageTimestamp = message.timestamp
