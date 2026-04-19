@@ -40,8 +40,28 @@ struct DeliveryScanView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Header
-                HStack {
+                // Header. Same pattern as Pickup: a back affordance during
+                // the scanning/signature phases so the driver can drop to
+                // the transfer list without closing the whole sheet. The ×
+                // still fully dismisses. Server session stays IN_PROGRESS
+                // and is resumable via the Live Tracking "Resume Delivery"
+                // link.
+                HStack(spacing: 12) {
+                    if viewModel.currentPhase == .scanning || viewModel.currentPhase == .signature {
+                        Button {
+                            viewModel.reset()
+                            Task { await viewModel.loadTransfers() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                Text("Transfers")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(BuneColors.accentPrimary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     Text("Delivery Scan")
                         .font(.title2)
                         .fontWeight(.bold)

@@ -314,6 +314,39 @@ struct ScanSessionSummary: Codable, Identifiable {
     let scannedCount: Int?
 }
 
+/// GET /transport/delivery/api/session/{id} response shape — the session
+/// plus every package with its per-session scan status. Gives the iOS
+/// client authoritative resume state instead of reconstructing locally.
+struct DeliverySessionDetail: Decodable {
+    let success: Bool?
+    let session: SessionWithPackages?
+    let error: String?
+
+    struct SessionWithPackages: Decodable {
+        let id: Int
+        let transferId: Int
+        let manifestNumber: String?
+        let receiverName: String?
+        let receiverLicense: String?
+        let customerEmail: String?
+        let status: String?
+        let startedAt: String?
+        let completedAt: String?
+        let packages: [SessionPackage]?
+        let scannedCount: Int?
+        let totalPackages: Int?
+        let allScanned: Bool?
+    }
+
+    struct SessionPackage: Decodable {
+        let packageLabel: String
+        let productName: String?
+        let shippedQuantity: Double?
+        let shippedUnit: String?
+        let scanned: Bool
+    }
+}
+
 /// Envelope returned by session endpoints: {success, session, resumed}.
 struct ScanSessionEnvelope: Decodable {
     let success: Bool?

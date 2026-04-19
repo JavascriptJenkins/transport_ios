@@ -103,24 +103,23 @@ class DeliveryScanViewModel: ObservableObject {
         isLoading = true
 
         do {
-            let session = try await apiClient.startDeliverySession(transferId: transferId)
+            let (session, _) = try await apiClient.startDeliverySession(transferId: transferId)
 
-            // Map Session to ScanSession
-            let packages = try await apiClient.getTransferPackages(transferId: transferId)
-            let scanPackages = packages.map { package in
-                ScanPackage(
-                    label: package.packageLabel,
-                    productName: package.productName,
-                    scanned: false
-                )
+            // Pull the authoritative session detail — packages + per-
+            // package scanned flags + scannedCount — so a resumed session
+            // reflects whatever the driver already scanned on the web or
+            // before backing out of this screen. No more local-only state.
+            let detail = try await apiClient.getDeliverySession(sessionId: session.id)
+            let scanPackages: [ScanPackage] = (detail.packages ?? []).map {
+                ScanPackage(label: $0.packageLabel, productName: $0.productName, scanned: $0.scanned)
             }
 
             scanSession = ScanSession(
                 sessionId: session.id,
                 transferId: transferId,
                 packages: scanPackages,
-                scannedCount: 0,
-                totalCount: packages.count
+                scannedCount: detail.scannedCount ?? scanPackages.filter(\.scanned).count,
+                totalCount: detail.totalPackages ?? scanPackages.count
             )
 
             selectedTransfer = availableTransfers.first { $0.id == transferId }
@@ -213,31 +212,30 @@ class DeliveryScanViewModel: ObservableObject {
     func completeDelivery(signatureData: String, signerName: String) async {
         guard let session = scanSession else { return }
 
+        // Client-side mirror of the backend accept-gate: completing is only
+        // legal once every package has been scanned out of the vehicle.
+        // Prevents a double-tap race where the user reaches the signature
+        // phase before a scan round-trip completes.
+        guard session.scannedCount >= session.totalCount, session.totalCount > 0 else {
+            errorMessage = "Scan all \(session.totalCount) packages out of the vehicle before capturing the signature."
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 
         do {
+            // completeDelivery flips the session to COMPLETE and the transfer
+            // to ACCEPTED server-side. The backend guards on scannedCount >=
+            // totalPackages, so a half-scanned session will come back with
+            // success=false and a specific error; surface that instead of a
+            // generic failure message.
             _ = try await apiClient.completeDelivery(
                 sessionId: session.sessionId,
                 signatureData: signatureData,
                 signerName: signerName
             )
 
-            // Use the guarded public-tracking endpoint instead of a raw
-            // tulipStatus write. markDelivered requires the backend's
-            // TransportStatusService.isInTransit() — i.e. all packages are
-            // physically in the vehicle — so this call fails fast if zone
-            // state doesn't back a DELIVERED transition.
-            if let transferId = selectedTransfer?.id {
-                let ack = try await apiClient.markDelivered(transferId: transferId)
-                if !ack.success && ack.alreadyDelivered != true {
-                    errorMessage = ack.error ?? "Failed to mark transfer delivered"
-                    isLoading = false
-                    return
-                }
-            }
-
-            // Store receipt (in a real app, this would come from the API response)
             // Use the API client's resolved baseURL so we honor the selected tenant.
             deliveryReceipt = DeliveryReceipt(
                 receiptUrl: "\(apiClient.baseURL)/receipts/\(session.sessionId)",

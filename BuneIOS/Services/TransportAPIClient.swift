@@ -538,8 +538,11 @@ class TransportAPIClient: ObservableObject {
     }
 
     /// Start or resume a delivery handoff session. Same shape as pickup
-    /// (singular "session", envelope wrapper).
-    func startDeliverySession(transferId: Int) async throws -> ScanSessionSummary {
+    /// (singular "session", envelope wrapper). `resumed` flips to true when
+    /// the backend found an IN_PROGRESS session for the same transfer and
+    /// returned that instead of creating a new one — callers should then
+    /// fetch getDeliverySession() to rehydrate scan state.
+    func startDeliverySession(transferId: Int) async throws -> (session: ScanSessionSummary, resumed: Bool) {
         struct StartSessionRequest: Encodable { let transferId: Int }
         let envelope: ScanSessionEnvelope = try await post(
             path: "/transport/delivery/api/session/start",
@@ -547,6 +550,19 @@ class TransportAPIClient: ObservableObject {
         )
         guard let session = envelope.session else {
             throw APIError.serverError(envelope.error ?? "Failed to start delivery session")
+        }
+        return (session, envelope.resumed ?? false)
+    }
+
+    /// Load the unified session + package-scan state. Use after a
+    /// resumed start so the local ScanSession matches whatever the driver
+    /// already scanned on another device / before backing out.
+    func getDeliverySession(sessionId: Int) async throws -> DeliverySessionDetail.SessionWithPackages {
+        let response: DeliverySessionDetail = try await get(
+            path: "/transport/delivery/api/session/\(sessionId)"
+        )
+        guard let session = response.session else {
+            throw APIError.serverError(response.error ?? "Failed to load delivery session")
         }
         return session
     }
