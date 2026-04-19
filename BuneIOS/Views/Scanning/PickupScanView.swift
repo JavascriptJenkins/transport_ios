@@ -37,8 +37,27 @@ struct PickupScanView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Header
-                HStack {
+                // Header. During scanning, render a back affordance so the
+                // driver can drop back to the transfer list without closing
+                // the whole sheet (the × still fully dismisses). The backend
+                // session stays IN_PROGRESS and is resumable from the
+                // transfer's Live Tracking screen.
+                HStack(spacing: 12) {
+                    if viewModel.currentPhase == .scanning {
+                        Button {
+                            viewModel.reset()
+                            Task { await viewModel.loadTransfers() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                Text("Transfers")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(BuneColors.accentPrimary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     Text("Pickup Scan")
                         .font(.title2)
                         .fontWeight(.bold)
