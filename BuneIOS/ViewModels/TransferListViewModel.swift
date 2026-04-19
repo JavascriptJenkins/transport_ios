@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 // MARK: - Category Enum
 //
@@ -74,6 +75,10 @@ class TransferListViewModel: ObservableObject {
     /// network fetch fails.
     private let cache: LocalCacheService?
 
+    /// Observed so that toggling demo mode triggers an immediate re-fetch +
+    /// cache wipe (the cached rows are now stale relative to the new state).
+    private var cancellables = Set<AnyCancellable>()
+
     private let statusOptions = [
         "CREATED",
         "DISPATCH",
@@ -88,7 +93,8 @@ class TransferListViewModel: ObservableObject {
     init(
         apiClient: TransportAPIClient,
         notificationService: NotificationService? = nil,
-        cache: LocalCacheService? = nil
+        cache: LocalCacheService? = nil,
+        demoModeService: DemoModeService? = nil
     ) {
         self.apiClient = apiClient
         self.notificationService = notificationService
@@ -97,6 +103,20 @@ class TransferListViewModel: ObservableObject {
         // first network call returns. Filtering/refresh will overwrite.
         if let cached = cache?.cachedTransfers, !cached.isEmpty {
             self.transfers = cached
+        }
+
+        // When demo mode flips on/off the cached transfer list is stale
+        // (either missing DEMO-0000001 or holding a ghost of it after wipe).
+        // Wipe the cache + force-refresh when we observe a change.
+        if let demoModeService = demoModeService {
+            demoModeService.$isActive
+                .dropFirst()                     // ignore the initial value
+                .removeDuplicates()
+                .sink { [weak self] _ in
+                    self?.cache?.cacheTransfers([])
+                    Task { [weak self] in await self?.refresh() }
+                }
+                .store(in: &cancellables)
         }
     }
 

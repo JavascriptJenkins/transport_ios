@@ -10,6 +10,7 @@ import SwiftUI
 // MARK: - Transfer List View
 struct TransferListView: View {
     @StateObject private var viewModel: TransferListViewModel
+    @EnvironmentObject private var demoModeService: DemoModeService
     @Environment(\.colorScheme) var colorScheme
 
     private let apiClient: TransportAPIClient
@@ -17,14 +18,16 @@ struct TransferListView: View {
     init(
         apiClient: TransportAPIClient,
         notificationService: NotificationService? = nil,
-        cache: LocalCacheService? = nil
+        cache: LocalCacheService? = nil,
+        demoModeService: DemoModeService? = nil
     ) {
         self.apiClient = apiClient
         _viewModel = StateObject(
             wrappedValue: TransferListViewModel(
                 apiClient: apiClient,
                 notificationService: notificationService,
-                cache: cache
+                cache: cache,
+                demoModeService: demoModeService
             )
         )
     }
@@ -196,6 +199,10 @@ struct TransferListView: View {
             .onAppear {
                 Task {
                     await viewModel.loadTransfers()
+                    // Pull the latest demo flag so the banner reflects
+                    // toggles from another user/device without needing
+                    // the settings screen to be visited first.
+                    await demoModeService.refresh()
                 }
             }
         }

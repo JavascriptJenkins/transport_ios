@@ -14,6 +14,7 @@ struct BuneIOSApp: App {
     @StateObject private var offlineSyncService = OfflineSyncService()
     @StateObject private var localCacheService = LocalCacheService()
     @StateObject private var notificationService = NotificationService()
+    @StateObject private var demoModeService = DemoModeService()
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,7 @@ struct BuneIOSApp: App {
                 .environmentObject(offlineSyncService)
                 .environmentObject(localCacheService)
                 .environmentObject(notificationService)
+                .environmentObject(demoModeService)
                 .preferredColorScheme(.dark)
                 .task {
                     await notificationService.requestPermission()

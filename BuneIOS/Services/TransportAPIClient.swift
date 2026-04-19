@@ -774,6 +774,37 @@ class TransportAPIClient: ObservableObject {
         return try JSONDecoder().decode(PackageMedia.self, from: data)
     }
 
+    // MARK: - Demo Mode
+    //
+    // Backend:
+    //   GET  /api/v1/transport/demo/status  — public, just { success, demoMode }
+    //   POST /api/v1/transport/demo/toggle?enabled=<bool>
+    //        — admin/manager/super-admin only; creates or wipes DEMO-0000001
+    //          and its 5 synthetic packages
+    //
+    // Demo mode is an **account-global** flag: flipping it on affects every
+    // user of this backend, and flipping it off cascade-deletes all demo
+    // artifacts. The iOS UI wraps this in a confirm sheet before disable.
+
+    func getDemoStatus() async throws -> Bool {
+        let response: DemoStatusResult = try await get(path: "/api/v1/transport/demo/status")
+        return response.demoMode
+    }
+
+    @discardableResult
+    func setDemoMode(enabled: Bool) async throws -> DemoToggleResult {
+        // The backend reads the flag from a query parameter on a POST — no
+        // request body. Empty-body POST is what the dashboard JS does too.
+        let result: DemoToggleResult = try await post(
+            path: "/api/v1/transport/demo/toggle?enabled=\(enabled)",
+            body: nil
+        )
+        if !result.success {
+            throw APIError.serverError(result.error ?? "Demo toggle failed")
+        }
+        return result
+    }
+
     // MARK: - Hub Intake
     //
     // End-to-end flow:

@@ -13,6 +13,7 @@ struct MainTabView: View {
     @EnvironmentObject var offlineSyncService: OfflineSyncService
     @EnvironmentObject var localCacheService: LocalCacheService
     @EnvironmentObject var notificationService: NotificationService
+    @EnvironmentObject var demoModeService: DemoModeService
 
     @State private var selectedTab = 0
     @State private var apiClient: TransportAPIClient?
@@ -25,7 +26,8 @@ struct MainTabView: View {
                     TransferListView(
                         apiClient: apiClient,
                         notificationService: notificationService,
-                        cache: localCacheService
+                        cache: localCacheService,
+                        demoModeService: demoModeService
                     )
                         .tabItem { Label("Transfers", systemImage: "shippingbox") }
                         .tag(0)
@@ -63,12 +65,13 @@ struct MainTabView: View {
                 }
                 .tint(BuneColors.accentPrimary)
 
-                // Offline banner overlay at top
-                VStack {
+                // Overlays at top: demo-mode banner (if active) + offline banner.
+                VStack(spacing: 0) {
+                    DemoModeBanner()
                     OfflineBanner()
                     Spacer()
                 }
-                .allowsHitTesting(false)
+                .allowsHitTesting(true) // demo banner is tappable; offline banner ignores hits internally
             } else {
                 // Loading state while API client initializes
                 ZStack {
@@ -84,6 +87,8 @@ struct MainTabView: View {
                 let client = TransportAPIClient(authService: authService)
                 apiClient = client
                 offlineSyncService.configure(apiClient: client)
+                demoModeService.configure(apiClient: client)
+                Task { await demoModeService.refresh() }
             }
         }
     }

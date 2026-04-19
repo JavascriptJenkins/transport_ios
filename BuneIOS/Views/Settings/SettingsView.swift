@@ -10,9 +10,11 @@ import SwiftUI
 // MARK: - Settings View
 struct SettingsView: View {
     @EnvironmentObject var authService: AuthService
+    @EnvironmentObject var demoModeService: DemoModeService
     @Environment(\.dismiss) var dismiss
 
     @State private var totpSheetMode: TOTPSettingsSheet.Mode?
+    @State private var showDemoSheet = false
 
     var body: some View {
         NavigationStack {
@@ -123,6 +125,33 @@ struct SettingsView: View {
                         }
                         .padding(.horizontal)
 
+                        // MARK: - Admin Section (managers / admins only)
+                        if authService.canManage {
+                            VStack(spacing: 16) {
+                                HStack {
+                                    Text("Admin")
+                                        .font(.headline)
+                                        .foregroundColor(BuneColors.textPrimary)
+                                    Spacer()
+                                }
+
+                                VStack(spacing: 10) {
+                                    SecurityRow(
+                                        icon: "theatermasks.fill",
+                                        title: "Demo Mode",
+                                        subtitle: demoModeService.isActive
+                                            ? "A synthetic DEMO-0000001 manifest is seeded on the backend."
+                                            : "Seed a synthetic manifest to exercise the app end to end.",
+                                        stateBadge: demoModeService.isActive ? .on : .off
+                                    ) {
+                                        showDemoSheet = true
+                                    }
+                                }
+                                .glassCard(cornerRadius: 16)
+                            }
+                            .padding(.horizontal)
+                        }
+
                         // MARK: - Data & Cache Section
                         VStack(spacing: 16) {
                             HStack {
@@ -200,6 +229,15 @@ struct SettingsView: View {
             )) { wrapper in
                 TOTPSettingsSheet(mode: wrapper.mode)
                     .environmentObject(authService)
+            }
+            .sheet(isPresented: $showDemoSheet) {
+                DemoModeSheet()
+                    .environmentObject(demoModeService)
+            }
+            .task {
+                // Re-sync demo mode from the server each time Settings opens
+                // so the ON/OFF badge reflects whatever another user toggled.
+                await demoModeService.refresh()
             }
         }
     }
