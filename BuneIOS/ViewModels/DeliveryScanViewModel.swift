@@ -236,10 +236,16 @@ class DeliveryScanViewModel: ObservableObject {
                 signerName: signerName
             )
 
-            // Use the API client's resolved baseURL so we honor the selected tenant.
+            // Receipt URL matches the public endpoint that the web's
+            // delivery-scan.html uses after submit:
+            //   /public/transfer/receipt/{transferId}
+            // (see PublicTransferTrackingController:/receipt/{transferId}).
+            // The QR on the completion screen links the customer directly
+            // to the PDF-downloadable receipt page.
+            let receiptUrl = "\(apiClient.baseURL)/public/transfer/receipt/\(session.transferId)"
             deliveryReceipt = DeliveryReceipt(
-                receiptUrl: "\(apiClient.baseURL)/receipts/\(session.sessionId)",
-                qrCodeUrl: "\(apiClient.baseURL)/qr/\(session.sessionId)"
+                receiptUrl: receiptUrl,
+                qrCodeUrl: receiptUrl
             )
 
             currentPhase = .complete

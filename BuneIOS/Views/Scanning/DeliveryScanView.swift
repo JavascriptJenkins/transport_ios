@@ -17,6 +17,7 @@ struct DeliveryScanView: View {
     @State private var manualEntryMode = false
     @State private var signerName = ""
     @State private var signatureImage: UIImage?
+    @State private var showReceiptShare = false
     @Environment(\.dismiss) var dismiss
 
     init(apiClient: TransportAPIClient, offlineSyncService: OfflineSyncService? = nil) {
@@ -474,10 +475,23 @@ struct DeliveryScanView: View {
 
             Spacer()
 
+            // Email-copy hint matching the web's confirmation flow: the
+            // signature the driver captures is emailed to the customer
+            // inline via DeliveryHandoffController.sendDeliveryEmailAsync.
+            HStack(spacing: 8) {
+                Image(systemName: "envelope.fill")
+                    .foregroundColor(BuneColors.accentPrimary)
+                Text("A signed receipt will be emailed to the customer.")
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.textSecondary)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+
             // Submit Button
             if !signerName.trimmingCharacters(in: .whitespaces).isEmpty && signatureImage != nil {
                 Button(action: {
-                    if let imageData = signatureImage?.base64PNGString {
+                    if let imageData = signatureImage?.base64PNGDataURL {
                         Task {
                             await viewModel.completeDelivery(
                                 signatureData: imageData,
@@ -488,7 +502,7 @@ struct DeliveryScanView: View {
                 }) {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Submit Delivery")
+                        Text("Submit & Complete")
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
@@ -544,13 +558,16 @@ struct DeliveryScanView: View {
                         .fontWeight(.bold)
                         .foregroundColor(BuneColors.textPrimary)
 
-                    Text("Signature received successfully")
+                    Text("Signed receipt emailed to the customer")
                         .font(.caption)
                         .foregroundColor(BuneColors.textSecondary)
+                        .multilineTextAlignment(.center)
                 }
             }
 
-            // Receipt QR Code
+            // Receipt QR Code + share. Points at the backend's public
+            // receipt page (/public/transfer/receipt/{transferId}) which
+            // renders the same PDF-downloadable receipt the web shows.
             if let receipt = viewModel.deliveryReceipt {
                 VStack(spacing: 16) {
                     VStack(spacing: 12) {
@@ -561,29 +578,41 @@ struct DeliveryScanView: View {
                                 .scaledToFit()
                                 .frame(width: 150, height: 150)
                                 .padding(16)
-                                .background(Color.white.opacity(0.07))
+                                .background(Color.white)
                                 .cornerRadius(12)
                         }
 
-                        Text("Download Receipt")
+                        Text("Scan to download the PDF receipt")
                             .font(.caption)
                             .fontWeight(.semibold)
                             .foregroundColor(BuneColors.textSecondary)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Receipt URL")
-                            .font(.caption2)
-                            .foregroundColor(BuneColors.textTertiary)
-
-                        Text(receipt.receiptUrl)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundColor(BuneColors.accentPrimary)
-                            .lineLimit(3)
+                    Button {
+                        showReceiptShare = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "square.and.arrow.up")
+                            Text("Share Receipt Link")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundColor(BuneColors.accentPrimary)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(BuneColors.accentPrimary.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(BuneColors.accentPrimary.opacity(0.35), lineWidth: 1)
+                                )
+                        )
                     }
-                    .padding(12)
-                    .background(Color.white.opacity(0.05))
-                    .cornerRadius(10)
+                    .sheet(isPresented: $showReceiptShare) {
+                        if let url = URL(string: receipt.receiptUrl) {
+                            ShareSheet(items: [url])
+                        }
+                    }
                 }
                 .padding(20)
                 .glassCard(cornerRadius: 14)
