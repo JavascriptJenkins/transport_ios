@@ -8,12 +8,18 @@
 import Foundation
 
 // MARK: - OAuth2 Token Response
+// A normal password-grant response carries access + refresh tokens. When the
+// user has 2FA enabled the server instead returns `mfa_required: true` with
+// an `mfa_token` and no access token — the client must re-submit using the
+// mfa_totp grant. Both response shapes decode through this one struct.
 struct TokenResponse: Codable {
-    let accessToken: String
-    let tokenType: String
+    let accessToken: String?
+    let tokenType: String?
     let expiresIn: Int?
     let refreshToken: String?
     let scope: String?
+    let mfaRequired: Bool?
+    let mfaToken: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
@@ -21,7 +27,12 @@ struct TokenResponse: Codable {
         case expiresIn = "expires_in"
         case refreshToken = "refresh_token"
         case scope
+        case mfaRequired = "mfa_required"
+        case mfaToken = "mfa_token"
     }
+
+    /// True when the backend returned an MFA challenge instead of real tokens.
+    var isMFAChallenge: Bool { (mfaRequired ?? false) && mfaToken != nil }
 }
 
 // MARK: - Login Credentials

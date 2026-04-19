@@ -43,6 +43,12 @@ class AuthService: ObservableObject {
     /// Token endpoint for the active tenant, or the legacy fallback.
     private var tokenURL: String { selectedTenant?.tokenURL ?? Config.tokenURL }
 
+    // MARK: - 2FA
+    /// Set when the server responds to a password grant with `mfa_required`.
+    /// LoginView watches this to show the TOTP code-entry sheet; value is the
+    /// short-lived mfa_token we must echo back with the code.
+    @Published var pendingMFAToken: String?
+
     // Storage keys
     private let accessTokenKey = "com.buneios.accessToken"
     private let refreshTokenKey = "com.buneios.refreshToken"
@@ -96,16 +102,17 @@ class AuthService: ObservableObject {
 
         do {
             let tokenResponse = try await requestToken(username: username, password: password)
-            accessToken = tokenResponse.accessToken
-            refreshToken = tokenResponse.refreshToken
-            saveTokens(access: tokenResponse.accessToken, refresh: tokenResponse.refreshToken)
-            isAuthenticated = true
 
-            // Parse roles from scope
-            let roles = tokenResponse.scope?.components(separatedBy: " ") ?? []
-            self.userRoles = roles
-            let expiresAt = tokenResponse.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
-            self.currentSession = UserSession(accessToken: tokenResponse.accessToken, refreshToken: tokenResponse.refreshToken, roles: roles, expiresAt: expiresAt)
+            // If the server issued an MFA challenge, stash the mfa_token and
+            // let the UI collect the TOTP code. No session is authenticated
+            // yet — isAuthenticated stays false.
+            if tokenResponse.isMFAChallenge, let mfaToken = tokenResponse.mfaToken {
+                pendingMFAToken = mfaToken
+                isLoading = false
+                return
+            }
+
+            try applyGrantedTokens(tokenResponse)
         } catch let error as AuthError {
             errorMessage = error.errorDescription
         } catch {
@@ -115,6 +122,56 @@ class AuthService: ObservableObject {
         isLoading = false
     }
 
+    /// Submit the 6-digit TOTP code the user received via email to complete a
+    /// login that was gated by 2FA. Consumes the pendingMFAToken.
+    func submitTOTPCode(_ code: String) async {
+        guard let mfaToken = pendingMFAToken else {
+            errorMessage = "No 2FA challenge pending."
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        do {
+            let response = try await requestTOTPToken(mfaToken: mfaToken, code: code)
+            try applyGrantedTokens(response)
+            pendingMFAToken = nil
+        } catch let error as AuthError {
+            errorMessage = error.errorDescription
+        } catch {
+            errorMessage = "Could not verify code. Try again."
+        }
+        isLoading = false
+    }
+
+    /// Cancel a pending MFA challenge (user tapped "back"). Wipes the
+    /// short-lived mfa_token so it isn't reused.
+    func cancelMFAChallenge() {
+        pendingMFAToken = nil
+        errorMessage = nil
+    }
+
+    /// Apply a token response that carries access + refresh tokens.
+    /// Throws if the response unexpectedly lacks an access token.
+    private func applyGrantedTokens(_ response: TokenResponse) throws {
+        guard let access = response.accessToken else {
+            throw AuthError.decodingError
+        }
+        accessToken = access
+        refreshToken = response.refreshToken
+        saveTokens(access: access, refresh: response.refreshToken)
+        isAuthenticated = true
+
+        let roles = response.scope?.components(separatedBy: " ") ?? []
+        self.userRoles = roles
+        let expiresAt = response.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
+        self.currentSession = UserSession(
+            accessToken: access,
+            refreshToken: response.refreshToken,
+            roles: roles,
+            expiresAt: expiresAt
+        )
+    }
+
     // MARK: - Logout
     func logout() {
         accessToken = nil
@@ -122,6 +179,7 @@ class AuthService: ObservableObject {
         isAuthenticated = false
         userRoles = []
         currentSession = nil
+        pendingMFAToken = nil
         clearStoredTokens()
     }
 
@@ -167,6 +225,40 @@ class AuthService: ObservableObject {
         }
     }
 
+    // MARK: - TOTP Token Request
+    /// Exchange an mfa_token + TOTP code for a full access/refresh token pair.
+    private func requestTOTPToken(mfaToken: String, code: String) async throws -> TokenResponse {
+        guard let url = URL(string: tokenURL) else {
+            throw AuthError.networkError("Invalid URL")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "grant_type", value: "mfa_totp"),
+            URLQueryItem(name: "mfa_token", value: mfaToken),
+            URLQueryItem(name: "totp_code", value: code.trimmingCharacters(in: .whitespaces))
+        ]
+        request.httpBody = components.query?.data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.unknown }
+
+        switch http.statusCode {
+        case 200...299:
+            guard let token = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+                throw AuthError.decodingError
+            }
+            return token
+        case 400, 401:
+            throw AuthError.invalidCredentials
+        default:
+            throw AuthError.serverError(http.statusCode)
+        }
+    }
+
     // MARK: - Token Refresh
     func refreshAccessToken() async throws {
         guard let currentRefresh = refreshToken else {
@@ -198,10 +290,16 @@ class AuthService: ObservableObject {
         }
 
         let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
-        accessToken = tokenResponse.accessToken
+        guard let newAccess = tokenResponse.accessToken else {
+            // Refresh endpoint should never return an MFA challenge, but
+            // defend against a malformed response.
+            logout()
+            return
+        }
+        accessToken = newAccess
         // Server issues a new refresh token each time; old one is revoked
         refreshToken = tokenResponse.refreshToken ?? currentRefresh
-        saveTokens(access: tokenResponse.accessToken, refresh: refreshToken)
+        saveTokens(access: newAccess, refresh: refreshToken)
     }
 
     // MARK: - Token Persistence

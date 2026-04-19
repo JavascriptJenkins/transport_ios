@@ -18,6 +18,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var showPassword = false
     @State private var animateGradient = false
+    @State private var totpCode = ""
     @FocusState private var focusedField: Field?
 
     enum Field: Hashable {
@@ -55,6 +56,13 @@ struct LoginView: View {
             }
         }
         .ignoresSafeArea(.all, edges: .all)
+        .sheet(isPresented: Binding(
+            get: { authService.pendingMFAToken != nil },
+            set: { if !$0 { authService.cancelMFAChallenge() } }
+        )) {
+            totpSheet
+                .presentationDetents([.medium])
+        }
         .onAppear {
             withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
                 animateGradient = true
@@ -440,6 +448,97 @@ struct LoginView: View {
         Task {
             await authService.login(username: username, password: password)
         }
+    }
+
+    // MARK: - TOTP Sheet
+    private var totpSheet: some View {
+        VStack(spacing: 22) {
+            VStack(spacing: 6) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(BuneColors.accentPrimary)
+                Text("Two-Factor Verification")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(BuneColors.textPrimary)
+                Text("We sent a 6-digit code to your email. Enter it below to finish signing in.")
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(BuneColors.textSecondary)
+                    .padding(.horizontal, 24)
+            }
+            .padding(.top, 20)
+
+            TextField("", text: $totpCode,
+                      prompt: Text("123456").foregroundColor(BuneColors.textTertiary))
+                .keyboardType(.numberPad)
+                .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                .multilineTextAlignment(.center)
+                .foregroundColor(BuneColors.textPrimary)
+                .padding(.vertical, 10)
+                .frame(maxWidth: 220)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(BuneColors.glassFill)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(BuneColors.glassBorder, lineWidth: 1)
+                        )
+                )
+
+            if let error = authService.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(Color(red: 1.0, green: 0.4, blue: 0.4))
+            }
+
+            Button {
+                Task {
+                    await authService.submitTOTPCode(totpCode)
+                    if authService.pendingMFAToken == nil {
+                        totpCode = ""
+                    }
+                }
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.35, green: 0.25, blue: 0.65),
+                                    Color(red: 0.25, green: 0.18, blue: 0.50)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 48)
+                    if authService.isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Verify")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .tracking(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 28)
+            .disabled(totpCode.count < 6 || authService.isLoading)
+            .opacity(totpCode.count < 6 || authService.isLoading ? 0.6 : 1.0)
+
+            Button("Cancel") {
+                totpCode = ""
+                authService.cancelMFAChallenge()
+            }
+            .font(.footnote)
+            .foregroundColor(BuneColors.textSecondary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(BuneColors.backgroundPrimary)
     }
 
     // MARK: - Tenant Selection Action
