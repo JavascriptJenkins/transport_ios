@@ -756,6 +756,155 @@ class TransportAPIClient: ObservableObject {
         return try JSONDecoder().decode(PackageMedia.self, from: data)
     }
 
+    // MARK: - Hub Intake
+    //
+    // End-to-end flow:
+    //   1. hubAcceptTransfer(id) — opens intake without changing status
+    //   2. createHubIntakeSession(...) — creates or resumes IN_PROGRESS session
+    //   3. scanIntoZone(...) for each package — existing zone-scan endpoint
+    //   4. getHubIntakeSession(id) — polls assignedCount for progress
+    //   5. completeHubIntakeSession(id) — auto-advances transfer to AT_HUB
+    //      when all packages are in STANDARD zones
+    //   6. abandonHubIntakeSession(id) — aborts
+
+    /// List available locations (warehouses/hubs) so the intake flow can
+    /// target the correct facility. Backend: GET /transport/api/locations.
+    func listLocations() async throws -> [Location] {
+        struct LocationsEnvelope: Decodable {
+            let success: Bool?
+            let locations: [Location]?
+        }
+        let envelope: LocationsEnvelope = try await get(path: "/transport/api/locations")
+        return envelope.locations ?? []
+    }
+
+    /// Pre-flight check before starting hub intake. Backend enforces that the
+    /// transfer is IN_TRANSIT and has packages; returns an error string if not.
+    /// Backend: POST /transport/api/transfers/{id}/hub-accept.
+    @discardableResult
+    func hubAcceptTransfer(transferId: Int) async throws -> Bool {
+        struct HubAcceptResponse: Decodable {
+            let success: Bool
+            let message: String?
+            let error: String?
+        }
+        let response: HubAcceptResponse = try await post(
+            path: "/transport/api/transfers/\(transferId)/hub-accept",
+            body: nil
+        )
+        if !response.success, let err = response.error {
+            throw APIError.serverError(err)
+        }
+        return response.success
+    }
+
+    /// Create or resume an IN_PROGRESS hub intake session for a transfer.
+    /// When a session already exists for the transfer, backend returns the
+    /// existing one with `resumed: true`. Backend: POST /transport/api/hub-intake/session.
+    func createHubIntakeSession(
+        transferId: Int,
+        transferManifestNumber: String?,
+        shipperName: String?,
+        receiverName: String?,
+        totalPackages: Int,
+        locationId: Int?,
+        locationName: String?
+    ) async throws -> (session: HubIntakeSession, resumed: Bool) {
+        struct CreateRequest: Encodable {
+            let transferId: Int
+            let transferManifestNumber: String?
+            let shipperName: String?
+            let receiverName: String?
+            let totalPackages: Int
+            let locationId: Int?
+            let locationName: String?
+        }
+        struct SessionEnvelope: Decodable {
+            let success: Bool
+            let session: HubIntakeSession?
+            let resumed: Bool?
+            let error: String?
+        }
+        let body = CreateRequest(
+            transferId: transferId,
+            transferManifestNumber: transferManifestNumber,
+            shipperName: shipperName,
+            receiverName: receiverName,
+            totalPackages: totalPackages,
+            locationId: locationId,
+            locationName: locationName
+        )
+        let response: SessionEnvelope = try await post(path: "/transport/api/hub-intake/session", body: body)
+        guard response.success, let session = response.session else {
+            throw APIError.serverError(response.error ?? "Could not create hub intake session")
+        }
+        return (session, response.resumed ?? false)
+    }
+
+    /// Refresh a hub intake session from the server — the response includes
+    /// assignedCount (packages in hub zones so far) which drives the progress bar.
+    /// Backend: GET /transport/api/hub-intake/session/{id}.
+    func getHubIntakeSession(id: Int) async throws -> HubIntakeSession {
+        struct SessionEnvelope: Decodable {
+            let success: Bool
+            let session: HubIntakeSession?
+            let error: String?
+        }
+        let response: SessionEnvelope = try await get(path: "/transport/api/hub-intake/session/\(id)")
+        guard response.success, let session = response.session else {
+            throw APIError.serverError(response.error ?? "Session not found")
+        }
+        return session
+    }
+
+    /// List all IN_PROGRESS sessions across the account.
+    /// Backend: GET /transport/api/hub-intake/sessions.
+    func listHubIntakeSessions() async throws -> [HubIntakeSession] {
+        struct SessionsEnvelope: Decodable {
+            let success: Bool?
+            let sessions: [HubIntakeSession]?
+        }
+        let response: SessionsEnvelope = try await get(path: "/transport/api/hub-intake/sessions")
+        return response.sessions ?? []
+    }
+
+    /// Mark a session COMPLETE. Server auto-advances the transfer to AT_HUB
+    /// when all packages are in STANDARD zones. Return value indicates whether
+    /// the status advance actually happened.
+    /// Backend: PUT /transport/api/hub-intake/session/{id}/complete.
+    @discardableResult
+    func completeHubIntakeSession(id: Int) async throws -> Bool {
+        struct CompleteResponse: Decodable {
+            let success: Bool
+            let statusAdvanced: Bool?
+            let error: String?
+        }
+        let response: CompleteResponse = try await put(
+            path: "/transport/api/hub-intake/session/\(id)/complete",
+            body: nil
+        )
+        if !response.success {
+            throw APIError.serverError(response.error ?? "Failed to complete session")
+        }
+        return response.statusAdvanced ?? false
+    }
+
+    /// Abort a session without completing it. Abandoned sessions can later be
+    /// re-created from scratch if needed.
+    /// Backend: PUT /transport/api/hub-intake/session/{id}/abandon.
+    @discardableResult
+    func abandonHubIntakeSession(id: Int) async throws -> Bool {
+        struct AbandonResponse: Decodable {
+            let success: Bool
+            let error: String?
+        }
+        let response: AbandonResponse = try await put(
+            path: "/transport/api/hub-intake/session/\(id)/abandon",
+            body: nil
+        )
+        return response.success
+    }
+
     // MARK: - Package Browse / Search
     //
     // Both browse and search live on the dashboard controller and return

@@ -26,6 +26,9 @@ struct TransferDetailView: View {
     // Package photos sheet target.
     @State private var photosPackageLabel: String?
 
+    // Hub intake sheet — contextual action for IN_TRANSIT transfers.
+    @State private var showHubIntake = false
+
     init(transferId: Int, apiClient: TransportAPIClient) {
         self.transferId = transferId
         self.apiClient = apiClient
@@ -363,6 +366,15 @@ struct TransferDetailView: View {
                         Label("Duplicate as New Manifest", systemImage: "square.on.square")
                     }
                     .disabled(isDuplicating || viewModel.transfer == nil)
+
+                    if let transfer = viewModel.transfer,
+                       transfer.status.uppercased() == "IN_TRANSIT" {
+                        Button {
+                            showHubIntake = true
+                        } label: {
+                            Label("Start Hub Intake", systemImage: "building.2.crop.circle")
+                        }
+                    }
                 } label: {
                     if isDownloadingManifest || isDuplicating {
                         ProgressView().tint(BuneColors.textPrimary)
@@ -409,6 +421,9 @@ struct TransferDetailView: View {
             set: { photosPackageLabel = $0?.value }
         )) { wrapper in
             PackagePhotosSheet(packageLabel: wrapper.value, apiClient: apiClient)
+        }
+        .sheet(isPresented: $showHubIntake) {
+            HubIntakeView(apiClient: apiClient)
         }
     }
 
