@@ -32,7 +32,7 @@ class OfflineSyncService: ObservableObject {
     // Operation types that can be queued
     enum QueuedOperation: Codable {
         case gpsPing(GPSPing)
-        case packageScan(sessionId: String, packageLabel: String, scanType: String)  // scanType: pickup/delivery
+        case packageScan(sessionId: Int, packageLabel: String, scanType: String)  // scanType: pickup/delivery
         case statusUpdate(transferId: Int, status: String)
         case zoneScan(zoneId: Int, packageLabel: String, action: String)
         case chatMessage(transferId: Int, text: String, sender: String)

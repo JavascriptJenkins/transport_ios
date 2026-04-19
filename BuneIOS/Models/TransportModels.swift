@@ -286,6 +286,38 @@ struct TransferPackage: Codable, Identifiable {
     let transferId: Int?
 }
 
+// MARK: - Scan Session Summary
+//
+// DTO returned by the pickup + delivery session endpoints
+// (/transport/pickup/api/session/* and /transport/delivery/api/session/*).
+// Different from TransportSession (which is the manifest-creation wizard) —
+// this one wraps an in-progress pickup or delivery SCAN session.
+struct ScanSessionSummary: Codable, Identifiable {
+    let id: Int
+    let transferId: Int
+    let manifestNumber: String?
+    let shipperName: String?
+    let shipperLicense: String?
+    let receiverName: String?
+    let receiverLicense: String?
+    let customerEmail: String?
+    let vehiclePlate: String?
+    let status: String?
+    let startedBy: String?
+    let startedAt: String?
+    let completedAt: String?
+    let totalPackages: Int?
+    let scannedCount: Int?
+}
+
+/// Envelope returned by session endpoints: {success, session, resumed}.
+struct ScanSessionEnvelope: Decodable {
+    let success: Bool?
+    let session: ScanSessionSummary?
+    let resumed: Bool?
+    let error: String?
+}
+
 // MARK: - Sessions
 
 struct TransportSession: Codable, Identifiable {

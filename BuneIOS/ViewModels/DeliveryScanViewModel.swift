@@ -97,7 +97,7 @@ class DeliveryScanViewModel: ObservableObject {
 
         do {
             _ = try await apiClient.scanDeliveryPackage(
-                sessionId: String(session.sessionId),
+                sessionId: session.sessionId,
                 packageLabel: label
             )
 
@@ -124,7 +124,7 @@ class DeliveryScanViewModel: ObservableObject {
 
         do {
             _ = try await apiClient.unscanDeliveryPackage(
-                sessionId: String(session.sessionId),
+                sessionId: session.sessionId,
                 packageLabel: label
             )
 
@@ -153,7 +153,7 @@ class DeliveryScanViewModel: ObservableObject {
 
         do {
             let result = try await apiClient.completeDelivery(
-                sessionId: String(session.sessionId),
+                sessionId: session.sessionId,
                 signatureData: signatureData,
                 signerName: signerName
             )

@@ -95,7 +95,7 @@ class PickupScanViewModel: ObservableObject {
 
         do {
             _ = try await apiClient.scanPickupPackage(
-                sessionId: String(session.sessionId),
+                sessionId: session.sessionId,
                 packageLabel: label
             )
 
@@ -122,7 +122,7 @@ class PickupScanViewModel: ObservableObject {
 
         do {
             _ = try await apiClient.unscanPickupPackage(
-                sessionId: String(session.sessionId),
+                sessionId: session.sessionId,
                 packageLabel: label
             )
 
@@ -150,7 +150,7 @@ class PickupScanViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            _ = try await apiClient.completePickup(sessionId: String(session.sessionId))
+            _ = try await apiClient.completePickup(sessionId: session.sessionId)
 
             // Update transfer status to IN_TRANSIT
             if let transferId = selectedTransfer?.id {

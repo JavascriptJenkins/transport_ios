@@ -464,28 +464,68 @@ class TransportAPIClient: ObservableObject {
         return response.transfers ?? []
     }
 
-    func startPickupSession(transferId: Int) async throws -> Session {
-        struct StartSessionRequest: Encodable {
-            let transferId: Int
+    /// Start or resume a pickup scan session.
+    /// Backend path is SINGULAR "session" and ends in "/start" — not
+    /// POST /sessions as earlier versions of this client assumed.
+    /// Response is wrapped as {success, session: {...}, resumed}.
+    func startPickupSession(transferId: Int) async throws -> ScanSessionSummary {
+        struct StartSessionRequest: Encodable { let transferId: Int }
+        let envelope: ScanSessionEnvelope = try await post(
+            path: "/transport/pickup/api/session/start",
+            body: StartSessionRequest(transferId: transferId)
+        )
+        guard let session = envelope.session else {
+            throw APIError.serverError(envelope.error ?? "Failed to start pickup session")
         }
-        return try await post(path: "/transport/pickup/api/sessions", body: StartSessionRequest(transferId: transferId))
+        return session
     }
 
-    func scanPickupPackage(sessionId: String, packageLabel: String) async throws -> Package {
-        struct ScanRequest: Encodable {
-            let packageLabel: String
+    /// Scan a package label into a pickup session. Backend returns a flat
+    /// {success, packageLabel, productName, scannedCount, totalPackages,
+    /// allScanned} envelope — we only surface success/error since the VM
+    /// tracks local progress off its own ScanSession state.
+    func scanPickupPackage(sessionId: Int, packageLabel: String) async throws {
+        struct ScanRequest: Encodable { let packageLabel: String }
+        struct ScanResponse: Decodable {
+            let success: Bool
+            let error: String?
+            let alreadyScanned: Bool?
         }
-        return try await post(path: "/transport/pickup/api/sessions/\(sessionId)/scan", body: ScanRequest(packageLabel: packageLabel))
+        let response: ScanResponse = try await post(
+            path: "/transport/pickup/api/session/\(sessionId)/scan",
+            body: ScanRequest(packageLabel: packageLabel)
+        )
+        if !response.success {
+            throw APIError.serverError(response.error ?? "Scan rejected")
+        }
+    }
+
+    /// Undo a scan. Backend uses POST /unscan with a body, not DELETE.
+    func unscanPickupPackage(sessionId: Int, packageLabel: String) async throws {
+        struct UnscanRequest: Encodable { let packageLabel: String }
+        struct UnscanResponse: Decodable {
+            let success: Bool
+            let error: String?
+        }
+        let response: UnscanResponse = try await post(
+            path: "/transport/pickup/api/session/\(sessionId)/unscan",
+            body: UnscanRequest(packageLabel: packageLabel)
+        )
+        if !response.success {
+            throw APIError.serverError(response.error ?? "Unscan rejected")
+        }
     }
 
     @discardableResult
-    func unscanPickupPackage(sessionId: String, packageLabel: String) async throws -> Package {
-        try await delete(path: "/transport/pickup/api/sessions/\(sessionId)/scan/\(packageLabel)")
-        return try await scanPackage(barcode: packageLabel)
-    }
-
-    func completePickup(sessionId: String) async throws -> Session {
-        return try await post(path: "/transport/pickup/api/sessions/\(sessionId)/complete", body: nil)
+    func completePickup(sessionId: Int) async throws -> ScanSessionSummary {
+        let envelope: ScanSessionEnvelope = try await post(
+            path: "/transport/pickup/api/session/\(sessionId)/complete",
+            body: nil
+        )
+        guard let session = envelope.session else {
+            throw APIError.serverError(envelope.error ?? "Failed to complete pickup")
+        }
+        return session
     }
 
     // MARK: - Delivery Scan
@@ -497,32 +537,65 @@ class TransportAPIClient: ObservableObject {
         return response.transfers ?? []
     }
 
-    func startDeliverySession(transferId: Int) async throws -> Session {
-        struct StartSessionRequest: Encodable {
-            let transferId: Int
+    /// Start or resume a delivery handoff session. Same shape as pickup
+    /// (singular "session", envelope wrapper).
+    func startDeliverySession(transferId: Int) async throws -> ScanSessionSummary {
+        struct StartSessionRequest: Encodable { let transferId: Int }
+        let envelope: ScanSessionEnvelope = try await post(
+            path: "/transport/delivery/api/session/start",
+            body: StartSessionRequest(transferId: transferId)
+        )
+        guard let session = envelope.session else {
+            throw APIError.serverError(envelope.error ?? "Failed to start delivery session")
         }
-        return try await post(path: "/transport/delivery/api/sessions", body: StartSessionRequest(transferId: transferId))
+        return session
     }
 
-    func scanDeliveryPackage(sessionId: String, packageLabel: String) async throws -> Package {
-        struct ScanRequest: Encodable {
-            let packageLabel: String
+    func scanDeliveryPackage(sessionId: Int, packageLabel: String) async throws {
+        struct ScanRequest: Encodable { let packageLabel: String }
+        struct ScanResponse: Decodable {
+            let success: Bool
+            let error: String?
+            let alreadyScanned: Bool?
         }
-        return try await post(path: "/transport/delivery/api/sessions/\(sessionId)/scan", body: ScanRequest(packageLabel: packageLabel))
+        let response: ScanResponse = try await post(
+            path: "/transport/delivery/api/session/\(sessionId)/scan",
+            body: ScanRequest(packageLabel: packageLabel)
+        )
+        if !response.success {
+            throw APIError.serverError(response.error ?? "Scan rejected")
+        }
+    }
+
+    func unscanDeliveryPackage(sessionId: Int, packageLabel: String) async throws {
+        struct UnscanRequest: Encodable { let packageLabel: String }
+        struct UnscanResponse: Decodable {
+            let success: Bool
+            let error: String?
+        }
+        let response: UnscanResponse = try await post(
+            path: "/transport/delivery/api/session/\(sessionId)/unscan",
+            body: UnscanRequest(packageLabel: packageLabel)
+        )
+        if !response.success {
+            throw APIError.serverError(response.error ?? "Unscan rejected")
+        }
     }
 
     @discardableResult
-    func unscanDeliveryPackage(sessionId: String, packageLabel: String) async throws -> Package {
-        try await delete(path: "/transport/delivery/api/sessions/\(sessionId)/scan/\(packageLabel)")
-        return try await scanPackage(barcode: packageLabel)
-    }
-
-    func completeDelivery(sessionId: String, signatureData: String, signerName: String) async throws -> Session {
+    func completeDelivery(sessionId: Int, signatureData: String, signerName: String) async throws -> ScanSessionSummary {
         struct CompleteRequest: Encodable {
             let signatureData: String
             let signerName: String
         }
-        return try await post(path: "/transport/delivery/api/sessions/\(sessionId)/complete", body: CompleteRequest(signatureData: signatureData, signerName: signerName))
+        let envelope: ScanSessionEnvelope = try await post(
+            path: "/transport/delivery/api/session/\(sessionId)/complete",
+            body: CompleteRequest(signatureData: signatureData, signerName: signerName)
+        )
+        guard let session = envelope.session else {
+            throw APIError.serverError(envelope.error ?? "Failed to complete delivery")
+        }
+        return session
     }
 
     // MARK: - GPS
