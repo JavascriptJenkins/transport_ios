@@ -700,65 +700,65 @@ private struct DeliveryPackageRow: View {
 
     @State private var showUnscanConfirm = false
 
+    // See PickupPackageRow for the full rationale — same nested-Button +
+    // propagated-.disabled trap. Flattened to HStack + onTapGesture with a
+    // sibling unscan button so taps land reliably on real devices.
+
     var body: some View {
-        Button {
-            if !package.scanned { onScan() }
-        } label: {
-            HStack(spacing: 12) {
-                if package.scanned {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(BuneColors.successColor)
-                } else {
-                    Image(systemName: "circle")
-                        .font(.system(size: 18))
-                        .foregroundColor(BuneColors.textTertiary)
-                }
+        HStack(spacing: 12) {
+            Image(systemName: package.scanned ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 18))
+                .foregroundColor(package.scanned ? BuneColors.successColor : BuneColors.textTertiary)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(package.label)
-                        .font(.system(.caption, design: .monospaced))
-                        .fontWeight(.semibold)
-                        .foregroundColor(BuneColors.textPrimary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(package.label)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(BuneColors.textPrimary)
 
-                    if let productName = package.productName {
-                        Text(productName)
-                            .font(.caption2)
-                            .foregroundColor(BuneColors.textSecondary)
-                    }
-                }
-
-                Spacer()
-
-                if package.scanned {
-                    Button(action: { showUnscanConfirm = true }) {
-                        Image(systemName: "xmark.circle")
-                            .font(.system(size: 16))
-                            .foregroundColor(BuneColors.textTertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .alert("Unscan Package?", isPresented: $showUnscanConfirm) {
-                        Button("Unscan", role: .destructive) { onUnscan() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Remove \(package.label) from scanned list?")
-                    }
-                } else {
-                    Text("Tap to scan")
+                if let productName = package.productName {
+                    Text(productName)
                         .font(.caption2)
-                        .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+                        .foregroundColor(BuneColors.textSecondary)
                 }
             }
-            .padding(12)
-            .background(
-                package.scanned
-                    ? BuneColors.successColor.opacity(0.08)
-                    : Color.white.opacity(0.05)
-            )
-            .cornerRadius(12)
+
+            Spacer(minLength: 8)
+
+            if package.scanned {
+                Button {
+                    showUnscanConfirm = true
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(BuneColors.textTertiary)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("Tap to scan")
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(package.scanned)
+        .padding(12)
+        .background(
+            package.scanned
+                ? BuneColors.successColor.opacity(0.08)
+                : Color.white.opacity(0.05)
+        )
+        .cornerRadius(12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !package.scanned { onScan() }
+        }
+        .alert("Unscan Package?", isPresented: $showUnscanConfirm) {
+            Button("Unscan", role: .destructive) { onUnscan() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Remove \(package.label) from scanned list?")
+        }
     }
 }
 

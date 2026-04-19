@@ -23,27 +23,55 @@ class LiveTrackingViewModel: ObservableObject {
 
     // MARK: - Derived UI State
 
-    /// Tight to DISPATCH / AT_HUB. CREATED is intentionally NOT depart-able
-    /// on this surface: the backend only flips a CREATED transfer to
-    /// DISPATCHING via the dashboard dispatch action, not via /track/depart.
+    /// Mirrors the web dashboard gate: driver can depart any pre-motion
+    /// state (CREATED, DISPATCH, AT_HUB) as long as they haven't already
+    /// logged a departure. This matches public-tracking.html's
+    /// `!d.departed && !['IN_TRANSIT','DELIVERED','ACCEPTED','CANCELED']` rule.
+    /// CREATED is intentionally allowed — the backend /track/depart action
+    /// just stamps tulipActualDepartureAt; the effective status advances to
+    /// DISPATCH "En Route to Pickup" once a ping lands.
     var canDepart: Bool {
-        guard let status = trackingStatus?.status.uppercased() else { return false }
-        return status == "DISPATCH" || status == "AT_HUB"
+        guard let s = trackingStatus else { return false }
+        if s.departed == true { return false }
+        let status = s.status.uppercased()
+        return !["IN_TRANSIT", "DELIVERED", "ACCEPTED", "CANCELED"].contains(status)
     }
 
+    /// Pickup scan is gated behind depart: the driver must have pinged their
+    /// departure before loading packages. Web dashboard enforces the same.
+    /// `hasPickupSession` is a fallback so a session already in progress is
+    /// always resumable even if the `departed` flag didn't round-trip.
     var canPickup: Bool {
-        trackingStatus?.status.uppercased() == "DISPATCH"
+        guard let s = trackingStatus else { return false }
+        let status = s.status.uppercased()
+        let rightStatus = status == "DISPATCH" || status == "AT_HUB"
+        return rightStatus && (s.departed == true || hasPickupSession)
     }
 
     var canDeliver: Bool {
         trackingStatus?.status.uppercased() == "IN_TRANSIT"
     }
 
-    // Session-resume flags are driven off whichever signal the backend
-    // surfaces; once wired to the scan-session endpoints these flip to true
-    // after the first scan. For now they stay false — no fake state.
-    var hasPickupSession: Bool { false }
-    var hasDeliverySession: Bool { false }
+    /// True when the driver has departed but the effective status hasn't
+    /// reached IN_TRANSIT yet — meaning not all packages are physically in
+    /// a vehicle zone. Used to render a "load remaining packages" hint in
+    /// place of the hidden Mark Delivered button so the user understands
+    /// why the action isn't available.
+    var needsPackagesLoaded: Bool {
+        guard let s = trackingStatus, s.departed == true else { return false }
+        let status = s.status.uppercased()
+        return status == "DISPATCH" || status == "AT_HUB"
+    }
+
+    // Session-resume flags come from /track/status — a pickup or delivery
+    // session in IN_PROGRESS state means the driver already started that
+    // phase and should see a "Resume" affordance on re-open.
+    var hasPickupSession: Bool {
+        trackingStatus?.pickupSessionInProgress == true
+    }
+    var hasDeliverySession: Bool {
+        trackingStatus?.deliverySessionInProgress == true
+    }
 
     /// Authoritative overdue flag comes from the backend; the old
     /// statusProgress>80 heuristic was inverted (an almost-done transfer

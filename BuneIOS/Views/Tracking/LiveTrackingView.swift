@@ -280,6 +280,33 @@ struct LiveTrackingView: View {
                             }
                             .accentButton()
                             .disabled(viewModel.isLoading)
+                        } else if viewModel.needsPackagesLoaded {
+                            // Match the backend's 400 error text so the
+                            // driver knows why Mark Delivered is absent —
+                            // effective status only reaches IN_TRANSIT once
+                            // all packages are physically in a vehicle zone.
+                            HStack(spacing: 10) {
+                                Image(systemName: "shippingbox.fill")
+                                    .foregroundColor(BuneColors.warningColor)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Load all packages into the vehicle")
+                                        .font(.caption.bold())
+                                        .foregroundColor(BuneColors.textPrimary)
+                                    Text("Mark Delivered unlocks once every package is scanned into the vehicle.")
+                                        .font(.caption2)
+                                        .foregroundColor(BuneColors.textSecondary)
+                                }
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(BuneColors.warningColor.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(BuneColors.warningColor.opacity(0.35), lineWidth: 1)
+                                    )
+                            )
                         }
 
                         // Delivery scan navigation

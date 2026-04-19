@@ -706,6 +706,12 @@ struct PublicTrackingStatus: Decodable {
     let overdue: Bool?
     let departed: Bool?
     let departedAt: String?
+    /// Set when there's an open pickup scan session — drives the "Resume
+    /// Pickup" affordance on Live Tracking. Added to the API alongside
+    /// pickupSessionComplete and deliverySessionInProgress.
+    let pickupSessionInProgress: Bool?
+    let pickupSessionComplete: Bool?
+    let deliverySessionInProgress: Bool?
     let messageCount: Int?
     let updatedAt: String?
 }

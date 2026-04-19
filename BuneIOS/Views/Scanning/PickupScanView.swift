@@ -594,69 +594,73 @@ private struct PickupPackageRow: View {
 
     @State private var showUnscanConfirm = false
 
+    // Tap-to-scan on the whole row, unscan via a sibling Button. Previously
+    // this was `Button { ... } label: { ... nested Button ... }` with
+    // `.disabled(package.scanned)` on the outer — that combination caused
+    // two real-device-only bugs:
+    //   1. The nested × Button never received taps because SwiftUI
+    //      propagates `.disabled` down the subtree.
+    //   2. After a handful of rows flipped to scanned, UIKit's hit-testing
+    //      tree for the nested Buttons got tangled and subsequent taps on
+    //      OTHER unscanned rows started getting swallowed.
+    // Flattening to HStack + contentShape + onTapGesture with a sibling
+    // (not nested) Button for unscan avoids both.
+
     var body: some View {
-        Button {
-            // Tap-to-scan when the row is unscanned. Scanned rows keep their
-            // tap inert so the explicit "×" button is the only way to undo
-            // a scan (reduces accidental unscans during fast taps).
-            if !package.scanned { onScan() }
-        } label: {
-            HStack(spacing: 12) {
-                if package.scanned {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(BuneColors.successColor)
-                } else {
-                    Image(systemName: "circle")
-                        .font(.system(size: 18))
-                        .foregroundColor(BuneColors.textTertiary)
-                }
+        HStack(spacing: 12) {
+            Image(systemName: package.scanned ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 18))
+                .foregroundColor(package.scanned ? BuneColors.successColor : BuneColors.textTertiary)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(package.label)
-                        .font(.system(.caption, design: .monospaced))
-                        .fontWeight(.semibold)
-                        .foregroundColor(BuneColors.textPrimary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(package.label)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(BuneColors.textPrimary)
 
-                    if let productName = package.productName {
-                        Text(productName)
-                            .font(.caption2)
-                            .foregroundColor(BuneColors.textSecondary)
-                    }
-                }
-
-                Spacer()
-
-                if package.scanned {
-                    Button(action: { showUnscanConfirm = true }) {
-                        Image(systemName: "xmark.circle")
-                            .font(.system(size: 16))
-                            .foregroundColor(BuneColors.textTertiary)
-                    }
-                    .buttonStyle(.plain) // don't inherit the row's Button behavior
-                    .alert("Unscan Package?", isPresented: $showUnscanConfirm) {
-                        Button("Unscan", role: .destructive) { onUnscan() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("Remove \(package.label) from scanned list?")
-                    }
-                } else {
-                    // Hint affordance for the tap-to-scan gesture.
-                    Text("Tap to scan")
+                if let productName = package.productName {
+                    Text(productName)
                         .font(.caption2)
-                        .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+                        .foregroundColor(BuneColors.textSecondary)
                 }
             }
-            .padding(12)
-            .background(
-                package.scanned
-                    ? BuneColors.successColor.opacity(0.08)
-                    : Color.white.opacity(0.05)
-            )
-            .cornerRadius(12)
+
+            Spacer(minLength: 8)
+
+            if package.scanned {
+                Button {
+                    showUnscanConfirm = true
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(BuneColors.textTertiary)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("Tap to scan")
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(package.scanned) // row-level button inert on scanned rows
+        .padding(12)
+        .background(
+            package.scanned
+                ? BuneColors.successColor.opacity(0.08)
+                : Color.white.opacity(0.05)
+        )
+        .cornerRadius(12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !package.scanned { onScan() }
+        }
+        .alert("Unscan Package?", isPresented: $showUnscanConfirm) {
+            Button("Unscan", role: .destructive) { onUnscan() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Remove \(package.label) from scanned list?")
+        }
     }
 }
 

@@ -520,44 +520,46 @@ private struct HubIntakePackageRow: View {
     let scanned: Bool
     let onScan: () -> Void
 
+    // Same flattened pattern as PickupPackageRow. No-op in the tap handler
+    // instead of `.disabled(scanned)` so the row stays in the hit-test tree
+    // in a consistent shape across state changes.
+
     var body: some View {
-        Button {
-            if !scanned { onScan() }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: scanned ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundColor(scanned ? BuneColors.statusDelivered : BuneColors.textTertiary)
+        HStack(spacing: 12) {
+            Image(systemName: scanned ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 18))
+                .foregroundColor(scanned ? BuneColors.statusDelivered : BuneColors.textTertiary)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(packageLabel)
-                        .font(.system(.caption, design: .monospaced))
-                        .fontWeight(.semibold)
-                        .foregroundColor(BuneColors.textPrimary)
-                    if let productName = productName, !productName.isEmpty {
-                        Text(productName)
-                            .font(.caption2)
-                            .foregroundColor(BuneColors.textSecondary)
-                    }
-                }
-
-                Spacer()
-
-                if !scanned {
-                    Text("Tap to scan")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(packageLabel)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.semibold)
+                    .foregroundColor(BuneColors.textPrimary)
+                if let productName = productName, !productName.isEmpty {
+                    Text(productName)
                         .font(.caption2)
-                        .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+                        .foregroundColor(BuneColors.textSecondary)
                 }
             }
-            .padding(12)
-            .background(
-                scanned
-                    ? BuneColors.statusDelivered.opacity(0.10)
-                    : Color.white.opacity(0.05)
-            )
-            .cornerRadius(12)
+
+            Spacer(minLength: 8)
+
+            if !scanned {
+                Text("Tap to scan")
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(scanned)
+        .padding(12)
+        .background(
+            scanned
+                ? BuneColors.statusDelivered.opacity(0.10)
+                : Color.white.opacity(0.05)
+        )
+        .cornerRadius(12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !scanned { onScan() }
+        }
     }
 }
