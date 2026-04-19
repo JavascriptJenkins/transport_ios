@@ -22,7 +22,11 @@ struct MainTabView: View {
             if let apiClient = apiClient {
                 TabView(selection: $selectedTab) {
                     // Tab 1: Dashboard/Transfers — everyone sees this
-                    TransferListView(apiClient: apiClient, notificationService: notificationService)
+                    TransferListView(
+                        apiClient: apiClient,
+                        notificationService: notificationService,
+                        cache: localCacheService
+                    )
                         .tabItem { Label("Transfers", systemImage: "shippingbox") }
                         .tag(0)
 
@@ -42,7 +46,7 @@ struct MainTabView: View {
 
                     // Tab 4: Create Manifest — managers and admin only
                     if authService.canCreateTransfers {
-                        SessionBuilderView(apiClient: apiClient)
+                        SessionBuilderView(apiClient: apiClient, cache: localCacheService)
                             .tabItem { Label("Create", systemImage: "plus.circle") }
                             .tag(3)
                     }

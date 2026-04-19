@@ -14,9 +14,11 @@ struct SessionBuilderView: View {
     private let apiClient: TransportAPIClient
     @Environment(\.dismiss) var dismiss
 
-    init(apiClient: TransportAPIClient) {
+    init(apiClient: TransportAPIClient, cache: LocalCacheService? = nil) {
         self.apiClient = apiClient
-        _viewModel = StateObject(wrappedValue: SessionBuilderViewModel(apiClient: apiClient))
+        _viewModel = StateObject(
+            wrappedValue: SessionBuilderViewModel(apiClient: apiClient, cache: cache)
+        )
     }
 
     var body: some View {

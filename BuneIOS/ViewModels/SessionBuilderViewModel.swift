@@ -56,11 +56,23 @@ class SessionBuilderViewModel: ObservableObject {
 
     // Private
     private let apiClient: TransportAPIClient
+    private let cache: LocalCacheService?
 
     // MARK: - Initialization
 
-    init(apiClient: TransportAPIClient) {
+    init(apiClient: TransportAPIClient, cache: LocalCacheService? = nil) {
         self.apiClient = apiClient
+        self.cache = cache
+        // Warm the reference-data fields from disk immediately so the
+        // Configure phase renders instantly with stale values while a
+        // network refresh happens in the background. Empty arrays stay
+        // empty — no spinners needed when a fresh cache exists.
+        if let cache = cache {
+            self.drivers = cache.cachedDrivers
+            self.vehicles = cache.cachedVehicles
+            self.destinations = cache.cachedDestinations
+            self.routes = cache.cachedRoutes
+        }
     }
 
     // MARK: - Session Management
@@ -145,8 +157,21 @@ class SessionBuilderViewModel: ObservableObject {
             routes = try await routesTask
             transporters = try await transportersTask
             transferTypes = try await transferTypesTask
+
+            // Push successful fetches into the local cache so subsequent
+            // launches (especially offline ones) can warm-start instantly.
+            cache?.cacheDrivers(drivers)
+            cache?.cacheVehicles(vehicles)
+            cache?.cacheDestinations(destinations)
+            cache?.cacheRoutes(routes)
         } catch {
-            errorMessage = "Failed to load reference data: \(error.localizedDescription)"
+            // If we already warm-started from cache, keep the stale values
+            // rather than wiping the UI to empty on a network blip.
+            let haveCachedData = !drivers.isEmpty || !vehicles.isEmpty
+                || !destinations.isEmpty || !routes.isEmpty
+            if !haveCachedData {
+                errorMessage = "Failed to load reference data: \(error.localizedDescription)"
+            }
         }
 
         isLoading = false

@@ -20,9 +20,14 @@ class OfflineSyncService: ObservableObject {
     private let monitorQueue = DispatchQueue(label: "com.buneios.networkMonitor")
     private var apiClient: TransportAPIClient?
 
-    // Queued operations stored as JSON in UserDefaults (simple approach)
-    // In production, use Core Data or SQLite
-    private let queueKey = "com.buneios.offlineQueue"
+    /// On-disk queue file. Persisted in Documents/BuneCache so entries survive
+    /// cold relaunches and aren't subject to the size-limited, system-pruned
+    /// UserDefaults storage.
+    private let queueFileURL: URL
+
+    // Legacy UserDefaults key — only read from on first launch to migrate
+    // any pending operations onto the new file-backed store.
+    private let legacyQueueKey = "com.buneios.offlineQueue"
 
     // Operation types that can be queued
     enum QueuedOperation: Codable {
@@ -34,8 +39,33 @@ class OfflineSyncService: ObservableObject {
     }
 
     init() {
+        // Build a Documents/BuneCache/offline-queue.json path, creating the
+        // directory if it doesn't exist yet.
+        let documentDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let cacheDir = documentDir.appendingPathComponent("BuneCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        self.queueFileURL = cacheDir.appendingPathComponent("offline-queue.json")
+
         startNetworkMonitoring()
+        migrateLegacyQueueIfNeeded()
         loadQueue()
+    }
+
+    /// One-shot migration: if a UserDefaults-backed queue exists from an
+    /// older build, move its entries onto the file-backed store and clear
+    /// the legacy key so we don't pick it up twice.
+    private func migrateLegacyQueueIfNeeded() {
+        guard let legacyData = UserDefaults.standard.data(forKey: legacyQueueKey) else { return }
+        defer { UserDefaults.standard.removeObject(forKey: legacyQueueKey) }
+        do {
+            let legacyOps = try JSONDecoder().decode([QueuedOperation].self, from: legacyData)
+            guard !legacyOps.isEmpty else { return }
+            var existing = loadQueueFromStorage()
+            existing.append(contentsOf: legacyOps)
+            saveQueueToStorage(existing)
+        } catch {
+            // Legacy payload unreadable — drop it rather than block startup.
+        }
     }
 
     func configure(apiClient: TransportAPIClient) {
@@ -74,7 +104,7 @@ class OfflineSyncService: ObservableObject {
         guard isOnline, !isSyncing else { return }
         isSyncing = true
 
-        var queue = loadQueueFromStorage()
+        let queue = loadQueueFromStorage()
         var failedOps: [QueuedOperation] = []
 
         for op in queue {
@@ -105,7 +135,7 @@ class OfflineSyncService: ObservableObject {
         case .statusUpdate(let transferId, let status):
             let _ = try await api.updateTransferStatus(id: transferId, status: status)
         case .zoneScan(let zoneId, let label, let action):
-            try await api.scanIntoZone(zoneId: zoneId, packageLabel: label, action: action)
+            _ = try await api.scanIntoZone(zoneId: zoneId, packageLabel: label, action: action)
         case .chatMessage(let transferId, let text, let sender):
             let _ = try await api.postMessage(transferId: transferId, text: text, sender: sender)
         }
@@ -114,13 +144,13 @@ class OfflineSyncService: ObservableObject {
     // MARK: - Storage Helpers
 
     private func loadQueueFromStorage() -> [QueuedOperation] {
-        guard let data = UserDefaults.standard.data(forKey: queueKey) else {
-            return []
-        }
+        guard FileManager.default.fileExists(atPath: queueFileURL.path) else { return [] }
         do {
+            let data = try Data(contentsOf: queueFileURL)
+            guard !data.isEmpty else { return [] }
             return try JSONDecoder().decode([QueuedOperation].self, from: data)
         } catch {
-            print("Failed to decode queue: \(error)")
+            print("Failed to decode offline queue: \(error)")
             return []
         }
     }
@@ -128,9 +158,10 @@ class OfflineSyncService: ObservableObject {
     private func saveQueueToStorage(_ queue: [QueuedOperation]) {
         do {
             let data = try JSONEncoder().encode(queue)
-            UserDefaults.standard.set(data, forKey: queueKey)
+            // Atomic write so a crash partway through doesn't corrupt the queue.
+            try data.write(to: queueFileURL, options: .atomic)
         } catch {
-            print("Failed to encode queue: \(error)")
+            print("Failed to encode offline queue: \(error)")
         }
     }
 

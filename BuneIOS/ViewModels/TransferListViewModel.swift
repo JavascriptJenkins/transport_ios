@@ -58,6 +58,10 @@ class TransferListViewModel: ObservableObject {
     /// need alerts can skip it.
     private let notificationService: NotificationService?
 
+    /// Local cache used to warm-start and to serve stale results when the
+    /// network fetch fails.
+    private let cache: LocalCacheService?
+
     private let statusOptions = [
         "CREATED",
         "DISPATCH",
@@ -69,9 +73,19 @@ class TransferListViewModel: ObservableObject {
     ]
 
     // MARK: - Init
-    init(apiClient: TransportAPIClient, notificationService: NotificationService? = nil) {
+    init(
+        apiClient: TransportAPIClient,
+        notificationService: NotificationService? = nil,
+        cache: LocalCacheService? = nil
+    ) {
         self.apiClient = apiClient
         self.notificationService = notificationService
+        self.cache = cache
+        // Warm-start from cache so the list has rows to render before the
+        // first network call returns. Filtering/refresh will overwrite.
+        if let cached = cache?.cachedTransfers, !cached.isEmpty {
+            self.transfers = cached
+        }
     }
 
     // MARK: - Public Methods
@@ -169,8 +183,19 @@ class TransferListViewModel: ObservableObject {
             // active ones with an ETA get an "arriving soon" + "overdue" pair.
             notificationService?.refreshScheduledAlerts(for: transfers)
 
+            // Snapshot to cache on first-page loads only so offline launches
+            // warm-start with the last-seen slice of transfers rather than
+            // a partial append of an old filter.
+            if !append && currentPage == 0 {
+                cache?.cacheTransfers(transfers)
+            }
+
         } catch {
-            errorMessage = "Failed to load transfers: \(error.localizedDescription)"
+            // Preserve any cached rows we warm-started with instead of clearing
+            // them on a network blip.
+            if transfers.isEmpty {
+                errorMessage = "Failed to load transfers: \(error.localizedDescription)"
+            }
         }
 
         isLoading = false
