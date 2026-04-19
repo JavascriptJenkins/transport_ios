@@ -74,8 +74,20 @@ struct UserSession {
 
     var isDriver: Bool { roles.contains("ROLE_TRANSPORT_DRIVER") || roles.contains("ROLE_DELIVERY_DRIVER") }
     var isClient: Bool { roles.contains("ROLE_TRANSPORT_CLIENT") }
-    var isManager: Bool { roles.contains("ROLE_TRANSPORTATION_MANAGER") }
-    var isAdmin: Bool { roles.contains("ROLE_ADMIN") }
+    /// Transportation manager OR any of the adjacent manager roles the backend
+    /// grants the same transport-admin capabilities to.
+    var isManager: Bool {
+        roles.contains("ROLE_TRANSPORTATION_MANAGER") ||
+        roles.contains("ROLE_STORE_MANAGER") ||
+        roles.contains("ROLE_INVENTORY_MANAGER")
+    }
+    /// Both regular admin and super admin. The backend's demo-toggle guard
+    /// checks `ROLE_ADMIN`, `ROLE_SUPER_ADMIN`, `ROLE_TRANSPORTATION_MANAGER` —
+    /// mirrored here so users with ROLE_SUPER_ADMIN don't silently see a
+    /// strictly smaller feature set than ROLE_ADMIN users.
+    var isAdmin: Bool {
+        roles.contains("ROLE_ADMIN") || roles.contains("ROLE_SUPER_ADMIN")
+    }
     var isDispatcher: Bool { roles.contains("ROLE_DISPATCH_COORDINATOR") }
     var isFleetManager: Bool { roles.contains("ROLE_VEHICLE_FLEET_MANAGER") }
     var isComplianceOfficer: Bool { roles.contains("ROLE_TRANSPORT_COMPLIANCE_OFFICER") }

@@ -20,10 +20,12 @@ class OfflineSyncService: ObservableObject {
     private let monitorQueue = DispatchQueue(label: "com.buneios.networkMonitor")
     private var apiClient: TransportAPIClient?
 
-    /// On-disk queue file. Persisted in Documents/BuneCache so entries survive
-    /// cold relaunches and aren't subject to the size-limited, system-pruned
-    /// UserDefaults storage.
-    private let queueFileURL: URL
+    /// On-disk queue file. Persisted in Documents/BuneCache/<tenant>/ so
+    /// entries survive cold relaunches, are isolated per tenant, and aren't
+    /// subject to the size-limited, system-pruned UserDefaults storage.
+    private var queueFileURL: URL
+
+    private(set) var tenantId: String?
 
     // Legacy UserDefaults key — only read from on first launch to migrate
     // any pending operations onto the new file-backed store.
@@ -39,16 +41,40 @@ class OfflineSyncService: ObservableObject {
     }
 
     init() {
-        // Build a Documents/BuneCache/offline-queue.json path, creating the
-        // directory if it doesn't exist yet.
-        let documentDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let cacheDir = documentDir.appendingPathComponent("BuneCache", isDirectory: true)
-        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        self.queueFileURL = cacheDir.appendingPathComponent("offline-queue.json")
+        self.queueFileURL = Self.queueFile(for: nil)
+        Self.ensureDirectory(for: queueFileURL)
 
         startNetworkMonitoring()
         migrateLegacyQueueIfNeeded()
         loadQueue()
+    }
+
+    /// Point the queue at a tenant-scoped file. Call on login / tenant
+    /// switch. In-flight drain is cancelled by virtue of isSyncing being
+    /// read before work starts; the new queue is loaded from disk.
+    func configure(tenantId newTenantId: String?) {
+        let normalized = newTenantId?.lowercased()
+        guard normalized != tenantId else { return }
+        tenantId = normalized
+        queueFileURL = Self.queueFile(for: normalized)
+        Self.ensureDirectory(for: queueFileURL)
+        loadQueue()
+    }
+
+    private static func queueFile(for tenantId: String?) -> URL {
+        let documentDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        var dir = documentDir.appendingPathComponent("BuneCache", isDirectory: true)
+        if let tenantId = tenantId, !tenantId.isEmpty {
+            dir = dir.appendingPathComponent(tenantId, isDirectory: true)
+        }
+        return dir.appendingPathComponent("offline-queue.json")
+    }
+
+    private static func ensureDirectory(for fileURL: URL) {
+        try? FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
     }
 
     /// One-shot migration: if a UserDefaults-backed queue exists from an
@@ -98,6 +124,40 @@ class OfflineSyncService: ObservableObject {
         queue.append(operation)
         saveQueueToStorage(queue)
         pendingOperationCount = queue.count
+    }
+
+    /// Convenience: if the given error is a network failure (offline,
+    /// timeout, dropped connection), enqueue the operation and return true.
+    /// Otherwise return false and let the caller surface the error.
+    ///
+    /// Lets ViewModels wire offline support with a single one-liner in
+    /// the catch block rather than duplicating the error-classification
+    /// logic across every scan / ping / status-update path.
+    @discardableResult
+    func enqueueIfNetworkFailure(_ error: Error, operation: QueuedOperation) -> Bool {
+        guard Self.isNetworkFailure(error) else { return false }
+        enqueue(operation)
+        return true
+    }
+
+    static func isNetworkFailure(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNotConnectedToInternet,
+                 NSURLErrorTimedOut,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorCannotConnectToHost,
+                 NSURLErrorDNSLookupFailed,
+                 NSURLErrorDataNotAllowed,
+                 NSURLErrorInternationalRoamingOff:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 
     func drainQueue() async {

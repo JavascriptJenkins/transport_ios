@@ -17,8 +17,16 @@ struct ZoneManagerView: View {
         GridItem(.flexible(), spacing: 16)
     ]
 
-    init(apiClient: TransportAPIClient) {
-        _viewModel = StateObject(wrappedValue: ZoneManagerViewModel(apiClient: apiClient))
+    /// The location we're managing zones for. Required — zones are
+    /// location-scoped on the backend. Callers typically pick from
+    /// apiClient.listLocations() first.
+    let location: Location
+
+    init(apiClient: TransportAPIClient, location: Location) {
+        self.location = location
+        let vm = ZoneManagerViewModel(apiClient: apiClient)
+        vm.locationId = location.id
+        _viewModel = StateObject(wrappedValue: vm)
     }
 
     var body: some View {
@@ -462,5 +470,14 @@ struct ScanAuditRow: View {
 // MARK: - Preview
 
 #Preview {
-    ZoneManagerView(apiClient: TransportAPIClient(authService: AuthService()))
+    ZoneManagerView(
+        apiClient: TransportAPIClient(authService: AuthService()),
+        location: Location(
+            id: 1,
+            name: "Demo Hub",
+            licenseNumber: nil,
+            facilityType: nil,
+            address: nil
+        )
+    )
 }

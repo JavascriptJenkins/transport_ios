@@ -34,14 +34,20 @@ struct MainTabView: View {
 
                     // Tab 2: Pickup Scan — drivers and managers only
                     if authService.canScan {
-                        PickupScanView(apiClient: apiClient)
+                        PickupScanView(
+                            apiClient: apiClient,
+                            offlineSyncService: offlineSyncService
+                        )
                             .tabItem { Label("Pickup", systemImage: "barcode.viewfinder") }
                             .tag(1)
                     }
 
                     // Tab 3: Delivery Scan — drivers and managers only
                     if authService.canScan {
-                        DeliveryScanView(apiClient: apiClient)
+                        DeliveryScanView(
+                            apiClient: apiClient,
+                            offlineSyncService: offlineSyncService
+                        )
                             .tabItem { Label("Deliver", systemImage: "checkmark.circle") }
                             .tag(2)
                     }
@@ -90,6 +96,13 @@ struct MainTabView: View {
                 demoModeService.configure(apiClient: client)
                 Task { await demoModeService.refresh() }
             }
+
+            // Scope on-disk caches + the offline queue to the active tenant so
+            // switching tenants never shows / drains another tenant's data.
+            // Safe to call every appear — configure() is a no-op if unchanged.
+            let tenantId = authService.selectedTenant?.id
+            localCacheService.configure(tenantId: tenantId)
+            offlineSyncService.configure(tenantId: tenantId)
         }
     }
 }

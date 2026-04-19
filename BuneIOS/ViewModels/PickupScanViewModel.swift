@@ -24,14 +24,16 @@ class PickupScanViewModel: ObservableObject {
     @Published var currentPhase: Phase = .selectTransfer
 
     private let apiClient: TransportAPIClient
+    private let offlineSyncService: OfflineSyncService?
 
     var scanProgress: Double {
         guard let session = scanSession, session.totalCount > 0 else { return 0 }
         return Double(session.scannedCount) / Double(session.totalCount)
     }
 
-    init(apiClient: TransportAPIClient) {
+    init(apiClient: TransportAPIClient, offlineSyncService: OfflineSyncService? = nil) {
         self.apiClient = apiClient
+        self.offlineSyncService = offlineSyncService
     }
 
     // MARK: - Load Transfers
@@ -141,19 +143,48 @@ class PickupScanViewModel: ObservableObject {
                 sessionId: session.sessionId,
                 packageLabel: label
             )
-
-            // Update local session
-            if var packages = scanSession?.packages {
-                if let index = packages.firstIndex(where: { $0.label == label }) {
-                    packages[index].scanned = true
-                    scanSession?.packages = packages
-                }
-            }
-
+            markLocallyScanned(label: label)
             isLoading = false
         } catch {
-            errorMessage = "Failed to scan package: \(error.localizedDescription)"
+            // If we're offline/timed out, queue the scan and optimistically
+            // flip the row scanned. The OfflineSyncService drains on reconnect;
+            // any server-side rejection surfaces later on drain.
+            let queued = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .packageScan(
+                    sessionId: session.sessionId,
+                    packageLabel: label,
+                    scanType: "pickup"
+                )
+            ) ?? false
+
+            if queued {
+                markLocallyScanned(label: label)
+                errorMessage = nil
+            } else {
+                errorMessage = "Failed to scan package: \(error.localizedDescription)"
+            }
             isLoading = false
+        }
+    }
+
+    /// Flip a package row's scanned flag in the local scanSession. Used by
+    /// both the online happy-path and the offline-queued path so the UI is
+    /// immediately responsive either way.
+    private func markLocallyScanned(label: String) {
+        if var packages = scanSession?.packages,
+           let index = packages.firstIndex(where: { $0.label == label }) {
+            packages[index].scanned = true
+            scanSession?.packages = packages
+            if let session = scanSession {
+                scanSession = ScanSession(
+                    sessionId: session.sessionId,
+                    transferId: session.transferId,
+                    packages: packages,
+                    scannedCount: packages.filter { $0.scanned }.count,
+                    totalCount: session.totalCount
+                )
+            }
         }
     }
 

@@ -15,6 +15,7 @@ struct SettingsView: View {
 
     @State private var totpSheetMode: TOTPSettingsSheet.Mode?
     @State private var showDemoSheet = false
+    @State private var showZoneManagerSheet = false
 
     var body: some View {
         NavigationStack {
@@ -146,6 +147,14 @@ struct SettingsView: View {
                                     ) {
                                         showDemoSheet = true
                                     }
+
+                                    AdminActionRow(
+                                        icon: "square.grid.2x2.fill",
+                                        title: "Zone Manager",
+                                        subtitle: "Browse zones at each location, scan packages, and review the scan audit log."
+                                    ) {
+                                        showZoneManagerSheet = true
+                                    }
                                 }
                                 .glassCard(cornerRadius: 16)
                             }
@@ -234,12 +243,62 @@ struct SettingsView: View {
                 DemoModeSheet()
                     .environmentObject(demoModeService)
             }
+            .sheet(isPresented: $showZoneManagerSheet) {
+                // Build a throwaway API client from AuthService for the
+                // duration of the sheet. Settings doesn't otherwise hold one.
+                ZoneManagerEntrySheet(
+                    apiClient: TransportAPIClient(authService: authService)
+                )
+            }
             .task {
                 // Re-sync demo mode from the server each time Settings opens
                 // so the ON/OFF badge reflects whatever another user toggled.
                 await demoModeService.refresh()
             }
         }
+    }
+}
+
+/// Simple navigation-style row for admin actions that don't have an ON/OFF
+/// state (unlike SecurityRow). Mirrors the row styling so the Admin section
+/// reads as a coherent list.
+struct AdminActionRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(BuneColors.accentPrimary)
+                    .frame(width: 32, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.bold())
+                        .foregroundColor(BuneColors.textPrimary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(BuneColors.textSecondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(BuneColors.textTertiary)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(BuneColors.backgroundTertiary)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

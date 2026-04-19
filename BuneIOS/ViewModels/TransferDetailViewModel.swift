@@ -23,6 +23,7 @@ class TransferDetailViewModel: ObservableObject {
     private let transferId: Int
     private let apiClient: TransportAPIClient
     private var messagePollingTimer: Timer?
+    private var detailPollingTimer: Timer?
     private var lastMessageTimestamp: String?
 
     // MARK: - Init
@@ -149,6 +150,54 @@ class TransferDetailViewModel: ObservableObject {
     func stopMessagePolling() {
         messagePollingTimer?.invalidate()
         messagePollingTimer = nil
+    }
+
+    // MARK: - Transfer Detail Polling
+    //
+    // Keeps the status pill, progress bar, ETA, and package list fresh
+    // while the user is looking at a transfer. Another driver / dispatcher
+    // can dispatch, complete, or cancel from the web in the middle of the
+    // user's session — without this the UI silently goes stale.
+
+    /// 20s is a compromise: short enough that a status change feels live,
+    /// long enough to not thrash the CPU/network while the user is reading.
+    private static let detailPollIntervalSeconds: TimeInterval = 20
+
+    func startDetailPolling() {
+        stopDetailPolling()
+        detailPollingTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.detailPollIntervalSeconds,
+            repeats: true
+        ) { [weak self] _ in
+            Task { await self?.refreshDetailSilently() }
+        }
+    }
+
+    func stopDetailPolling() {
+        detailPollingTimer?.invalidate()
+        detailPollingTimer = nil
+    }
+
+    /// Poll-driven refresh: reloads transfer + packages without flipping
+    /// isLoading (no spinner) and without clobbering errorMessage on a
+    /// transient blip.
+    private func refreshDetailSilently() async {
+        do {
+            let updated = try await apiClient.getTransfer(id: transferId)
+            transfer = updated
+            if let inline = updated.packages, !inline.isEmpty {
+                packages = inline
+            } else {
+                // Non-fatal: if the packages endpoint fails we keep the
+                // previously loaded list.
+                if let reloaded = try? await apiClient.getTransferPackages(transferId: transferId) {
+                    packages = reloaded
+                }
+            }
+        } catch {
+            // Silent on poll failure — don't disturb the UI with transient
+            // "failed to refresh" banners.
+        }
     }
 
 }

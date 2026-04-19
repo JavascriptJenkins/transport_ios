@@ -16,8 +16,11 @@ struct PickupScanView: View {
     @State private var manualEntryMode = false
     @Environment(\.dismiss) var dismiss
 
-    init(apiClient: TransportAPIClient) {
-        _viewModel = StateObject(wrappedValue: PickupScanViewModel(apiClient: apiClient))
+    init(apiClient: TransportAPIClient, offlineSyncService: OfflineSyncService? = nil) {
+        _viewModel = StateObject(wrappedValue: PickupScanViewModel(
+            apiClient: apiClient,
+            offlineSyncService: offlineSyncService
+        ))
     }
 
     var body: some View {

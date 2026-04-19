@@ -347,6 +347,10 @@ struct TransferDetailView: View {
         }
         .task {
             await viewModel.loadAll()
+            viewModel.startDetailPolling()
+        }
+        .onDisappear {
+            viewModel.stopDetailPolling()
         }
         .navigationTitle("Transfer Details")
         .navigationBarTitleDisplayMode(.inline)

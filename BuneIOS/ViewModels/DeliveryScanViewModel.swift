@@ -26,14 +26,16 @@ class DeliveryScanViewModel: ObservableObject {
     @Published var currentPhase: Phase = .selectTransfer
 
     private let apiClient: TransportAPIClient
+    private let offlineSyncService: OfflineSyncService?
 
     var scanProgress: Double {
         guard let session = scanSession, session.totalCount > 0 else { return 0 }
         return Double(session.scannedCount) / Double(session.totalCount)
     }
 
-    init(apiClient: TransportAPIClient) {
+    init(apiClient: TransportAPIClient, offlineSyncService: OfflineSyncService? = nil) {
         self.apiClient = apiClient
+        self.offlineSyncService = offlineSyncService
     }
 
     // MARK: - Load Transfers
@@ -143,20 +145,40 @@ class DeliveryScanViewModel: ObservableObject {
                 sessionId: session.sessionId,
                 packageLabel: label
             )
-
-            // Update local session
-            if var packages = scanSession?.packages {
-                if let index = packages.firstIndex(where: { $0.label == label }) {
-                    packages[index].scanned = true
-                    scanSession?.packages = packages
-                }
-            }
-
+            markLocallyScanned(label: label)
             isLoading = false
         } catch {
-            errorMessage = "Failed to scan package: \(error.localizedDescription)"
+            let queued = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .packageScan(
+                    sessionId: session.sessionId,
+                    packageLabel: label,
+                    scanType: "delivery"
+                )
+            ) ?? false
+
+            if queued {
+                markLocallyScanned(label: label)
+                errorMessage = nil
+            } else {
+                errorMessage = "Failed to scan package: \(error.localizedDescription)"
+            }
             isLoading = false
         }
+    }
+
+    private func markLocallyScanned(label: String) {
+        guard var packages = scanSession?.packages,
+              let index = packages.firstIndex(where: { $0.label == label }),
+              let session = scanSession else { return }
+        packages[index].scanned = true
+        scanSession = ScanSession(
+            sessionId: session.sessionId,
+            transferId: session.transferId,
+            packages: packages,
+            scannedCount: packages.filter { $0.scanned }.count,
+            totalCount: session.totalCount
+        )
     }
 
     func unscanPackage(_ label: String) async {

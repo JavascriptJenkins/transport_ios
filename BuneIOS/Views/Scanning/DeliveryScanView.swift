@@ -19,8 +19,11 @@ struct DeliveryScanView: View {
     @State private var signatureImage: UIImage?
     @Environment(\.dismiss) var dismiss
 
-    init(apiClient: TransportAPIClient) {
-        _viewModel = StateObject(wrappedValue: DeliveryScanViewModel(apiClient: apiClient))
+    init(apiClient: TransportAPIClient, offlineSyncService: OfflineSyncService? = nil) {
+        _viewModel = StateObject(wrappedValue: DeliveryScanViewModel(
+            apiClient: apiClient,
+            offlineSyncService: offlineSyncService
+        ))
     }
 
     var body: some View {

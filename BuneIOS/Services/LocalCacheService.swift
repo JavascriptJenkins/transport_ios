@@ -17,7 +17,12 @@ class LocalCacheService: ObservableObject {
     @Published var cachedDestinations: [Destination] = []
     @Published var lastRefreshAt: Date?
 
-    private let cacheDirectory: URL
+    /// Tenant this cache is currently scoped to (nil = legacy single-tenant
+    /// fallback). Switching tenants wipes the in-memory state and re-points
+    /// the directory so data from another tenant never bleeds through.
+    private(set) var tenantId: String?
+
+    private var cacheDirectory: URL
     private let transfersCacheKey = "cached_transfers"
     private let driversCacheKey = "cached_drivers"
     private let vehiclesCacheKey = "cached_vehicles"
@@ -29,15 +34,8 @@ class LocalCacheService: ObservableObject {
     private let referenceDataTTL: TimeInterval = 1800
 
     init() {
-        // Create cache directory in Documents
-        let documentDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        self.cacheDirectory = documentDir.appendingPathComponent("BuneCache", isDirectory: true)
-
-        do {
-            try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-        } catch {
-            print("Failed to create cache directory: \(error)")
-        }
+        self.cacheDirectory = Self.directory(for: nil)
+        Self.ensureExists(cacheDirectory)
 
         // Load cached data from disk
         loadCachedTransfers()
@@ -45,6 +43,49 @@ class LocalCacheService: ObservableObject {
         loadCachedVehicles()
         loadCachedRoutes()
         loadCachedDestinations()
+    }
+
+    /// Point the cache at a tenant-scoped subdirectory. Call this on login
+    /// or tenant switch. Wipes in-memory state (but NOT on-disk data for
+    /// the new tenant) and reloads from that tenant's files.
+    func configure(tenantId newTenantId: String?) {
+        let normalized = newTenantId?.lowercased()
+        guard normalized != tenantId else { return }
+        tenantId = normalized
+        cacheDirectory = Self.directory(for: normalized)
+        Self.ensureExists(cacheDirectory)
+
+        // Reset in-memory state before reloading so we don't briefly show
+        // the previous tenant's data to the new tenant's views.
+        cachedTransfers = []
+        cachedDrivers = []
+        cachedVehicles = []
+        cachedRoutes = []
+        cachedDestinations = []
+        lastRefreshAt = nil
+
+        loadCachedTransfers()
+        loadCachedDrivers()
+        loadCachedVehicles()
+        loadCachedRoutes()
+        loadCachedDestinations()
+    }
+
+    private static func directory(for tenantId: String?) -> URL {
+        let documentDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let root = documentDir.appendingPathComponent("BuneCache", isDirectory: true)
+        if let tenantId = tenantId, !tenantId.isEmpty {
+            return root.appendingPathComponent(tenantId, isDirectory: true)
+        }
+        return root
+    }
+
+    private static func ensureExists(_ url: URL) {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            print("Failed to create cache directory at \(url.path): \(error)")
+        }
     }
 
     // MARK: - Cache Transfers
@@ -173,8 +214,9 @@ class LocalCacheService: ObservableObject {
         do {
             let encodedData = try JSONEncoder().encode(data)
             try encodedData.write(to: fileURL)
-            // Save timestamp
-            UserDefaults.standard.set(Date(), forKey: "\(key)_timestamp")
+            // Save timestamp scoped to the same tenant so TTL checks don't
+            // accept timestamps from a different tenant's last fetch.
+            UserDefaults.standard.set(Date(), forKey: timestampKey(for: key))
         } catch {
             print("Failed to save cache for key \(key): \(error)")
         }
@@ -192,10 +234,20 @@ class LocalCacheService: ObservableObject {
     }
 
     private func getCacheTimestamp(forKey key: String) -> Date? {
-        return UserDefaults.standard.object(forKey: "\(key)_timestamp") as? Date
+        return UserDefaults.standard.object(forKey: timestampKey(for: key)) as? Date
     }
 
     private func cacheFileURL(forKey key: String) -> URL {
         return cacheDirectory.appendingPathComponent("\(key).json")
+    }
+
+    /// Build a tenant-scoped UserDefaults key for the given cache entry's
+    /// timestamp so switching tenants doesn't inherit the other tenant's
+    /// freshness window.
+    private func timestampKey(for key: String) -> String {
+        if let tenantId = tenantId, !tenantId.isEmpty {
+            return "\(key)_timestamp_\(tenantId)"
+        }
+        return "\(key)_timestamp"
     }
 }
