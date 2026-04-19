@@ -49,11 +49,54 @@ class PickupScanViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Eligibility
+
+    /// Statuses (raw code OR display label) that are ready for pickup scanning.
+    /// Matches the backend's PickupScanController filter which only returns
+    /// transfers whose computeEffectiveStatus is DISPATCH or AT_HUB.
+    private static let pickupEligibleTokens: Set<String> = [
+        "DISPATCH", "AT_HUB",
+        // Common label equivalents surfaced via statusLabel on the API row:
+        "STAGED FOR PICKUP", "EN ROUTE TO PICKUP", "AT HUB"
+    ]
+
+    /// Returns nil when the transfer is eligible for pickup; otherwise a
+    /// driver-facing explanation of why it isn't.
+    static func pickupBlockedReason(for transfer: Transfer) -> String? {
+        let normalized = transfer.status.uppercased()
+        if pickupEligibleTokens.contains(normalized) { return nil }
+
+        switch normalized {
+        case "CREATED":
+            return "This transfer hasn't been dispatched yet. Dispatch it from the Transfers tab before picking up packages."
+        case "IN_TRANSIT", "EN_ROUTE":
+            return "This transfer is already in transit — packages are loaded on the vehicle."
+        case "DELIVERED":
+            return "This transfer has already been delivered."
+        case "ACCEPTED":
+            return "This transfer has been accepted at its destination."
+        case "CANCELED", "CANCELLED":
+            return "This transfer was canceled."
+        default:
+            return "Transfer can't be picked up while it's in “\(transfer.status)” status."
+        }
+    }
+
     // MARK: - Session Management
 
     func startSession(transferId: Int) async {
-        isLoading = true
         errorMessage = nil
+
+        // Belt-and-braces guard: the backend already filters its pickup list
+        // to DISPATCH/AT_HUB, but users may reach this path from cached lists
+        // or from a transfer that flipped status between fetch and tap.
+        if let transfer = availableTransfers.first(where: { $0.id == transferId }),
+           let reason = Self.pickupBlockedReason(for: transfer) {
+            errorMessage = reason
+            return
+        }
+
+        isLoading = true
 
         do {
             let session = try await apiClient.startPickupSession(transferId: transferId)

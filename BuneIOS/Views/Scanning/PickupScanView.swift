@@ -100,7 +100,20 @@ struct PickupScanView: View {
                     .foregroundColor(BuneColors.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+
+            // Explain why pickup is gated on DISPATCH status so users with a
+            // CREATED transfer on the dashboard aren't confused when it's
+            // missing here or blocked on tap.
+            eligibilityInfoBanner
+                .padding(.horizontal, 20)
+
+            // Inline error (ineligible tap, network failure, etc).
+            if let error = viewModel.errorMessage {
+                eligibilityErrorBanner(error)
+                    .padding(.horizontal, 20)
+            }
 
             if viewModel.isLoading {
                 VStack(spacing: 16) {
@@ -110,32 +123,30 @@ struct PickupScanView: View {
                         .foregroundColor(BuneColors.textSecondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else if let error = viewModel.errorMessage {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 40))
-                        .foregroundColor(BuneColors.errorColor)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(BuneColors.errorColor)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .padding(20)
             } else if viewModel.availableTransfers.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "inbox")
                         .font(.system(size: 40))
                         .foregroundColor(BuneColors.textTertiary)
-                    Text("No transfers available")
+                    Text("No transfers ready for pickup")
                         .foregroundColor(BuneColors.textSecondary)
+                        .font(.subheadline)
+                    Text("Transfers show up here once they've been dispatched from the Transfers tab.")
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BuneColors.textTertiary)
+                        .padding(.horizontal, 32)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     VStack(spacing: 12) {
                         ForEach(viewModel.availableTransfers) { transfer in
-                            TransferSelectRow(transfer: transfer) {
+                            let blocked = PickupScanViewModel.pickupBlockedReason(for: transfer)
+                            TransferSelectRow(
+                                transfer: transfer,
+                                blockedReason: blocked
+                            ) {
                                 Task { await viewModel.startSession(transferId: transfer.id) }
                             }
                         }
@@ -146,6 +157,64 @@ struct PickupScanView: View {
 
             Spacer()
         }
+    }
+
+    // MARK: - Eligibility banners
+
+    private var eligibilityInfoBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .foregroundColor(BuneColors.accentPrimary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Only dispatched transfers can be picked up")
+                    .font(.caption.bold())
+                    .foregroundColor(BuneColors.textPrimary)
+                Text("Transfers must be in DISPATCH or AT_HUB status. Anything still in CREATED status needs to be dispatched first from the Transfers tab.")
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.textSecondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(BuneColors.accentPrimary.opacity(0.15))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(BuneColors.accentPrimary.opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+
+    private func eligibilityErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(Color(red: 1.0, green: 0.6, blue: 0.3))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Can't start pickup")
+                    .font(.caption.bold())
+                    .foregroundColor(BuneColors.textPrimary)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.textSecondary)
+            }
+            Spacer()
+            Button {
+                viewModel.errorMessage = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(BuneColors.textTertiary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.3, green: 0.15, blue: 0.05).opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(red: 0.95, green: 0.61, blue: 0.07).opacity(0.35), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Phase 2: Scanning
@@ -428,6 +497,10 @@ struct PickupScanView: View {
 
 private struct TransferSelectRow: View {
     let transfer: Transfer
+    /// When non-nil, the row still renders but is visually dimmed + tappable.
+    /// Tapping surfaces the reason via the view model's errorMessage so the
+    /// user knows why pickup can't start yet (e.g. CREATED status).
+    let blockedReason: String?
     let onTap: () -> Void
 
     var body: some View {
@@ -440,16 +513,7 @@ private struct TransferSelectRow: View {
                             .fontWeight(.semibold)
                             .foregroundColor(BuneColors.textPrimary)
 
-                        if transfer.status == "DISPATCH" || transfer.status == "AT_HUB" {
-                            Label("In Progress", systemImage: "hourglass")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(BuneColors.warningColor)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(BuneColors.warningColor.opacity(0.15))
-                                .cornerRadius(6)
-                        }
+                        statusChip
                     }
 
                     HStack(spacing: 16) {
@@ -473,17 +537,50 @@ private struct TransferSelectRow: View {
                                 .foregroundColor(BuneColors.textSecondary)
                         }
                     }
+
+                    if let reason = blockedReason {
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundColor(Color(red: 1.0, green: 0.6, blue: 0.3))
+                            .padding(.top, 2)
+                    }
                 }
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
+                Image(systemName: blockedReason == nil ? "chevron.right" : "lock.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(BuneColors.textTertiary)
             }
             .padding(14)
             .glassCard(cornerRadius: 14)
+            .opacity(blockedReason == nil ? 1.0 : 0.75)
         }
+    }
+
+    /// Small pill showing the transfer's current status so the driver
+    /// knows at a glance why a row might not be pickup-able.
+    private var statusChip: some View {
+        let label = transfer.status
+        let (fg, bg): (Color, Color) = {
+            switch transfer.status.uppercased() {
+            case "DISPATCH", "STAGED FOR PICKUP", "EN ROUTE TO PICKUP":
+                return (BuneColors.statusDispatch, BuneColors.statusDispatch.opacity(0.18))
+            case "AT_HUB", "AT HUB":
+                return (BuneColors.statusAtHub, BuneColors.statusAtHub.opacity(0.18))
+            case "CREATED":
+                return (BuneColors.warningColor, BuneColors.warningColor.opacity(0.18))
+            default:
+                return (BuneColors.textTertiary, Color.white.opacity(0.08))
+            }
+        }()
+        return Text(label)
+            .font(.caption2.bold())
+            .foregroundColor(fg)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(bg)
+            .cornerRadius(6)
     }
 }
 
