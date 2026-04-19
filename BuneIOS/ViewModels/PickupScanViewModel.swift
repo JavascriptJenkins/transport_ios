@@ -212,21 +212,22 @@ class PickupScanViewModel: ObservableObject {
 
     func checkForActiveSession() async {
         for transfer in availableTransfers {
-            if transfer.status == "DISPATCH" || transfer.status == "AT_HUB" {
-                // Check if this transfer has an active session
-                // For now, we'll load the transfer detail to check
-                do {
-                    let detail = try await apiClient.getTransfer(id: transfer.id)
-                    if detail.statusProgress != nil && detail.statusProgress ?? 0 > 0 {
-                        // Offer to resume this session
-                        selectedTransfer = detail
-                        // App should show resume alert here
-                        break
-                    }
-                } catch {
-                    // Continue to next transfer
-                    continue
+            // Only consider pickup-eligible rows. Uses the shared
+            // eligibility check so we stay consistent with startSession and
+            // catch all the label forms the backend might return
+            // ("Staged for Pickup", "At Hub", etc.) — the old literal
+            // comparison against "DISPATCH" / "AT_HUB" missed those.
+            guard Self.pickupBlockedReason(for: transfer) == nil else { continue }
+
+            do {
+                let detail = try await apiClient.getTransfer(id: transfer.id)
+                if (detail.statusProgress ?? 0) > 0 {
+                    selectedTransfer = detail
+                    // App should show resume alert here
+                    break
                 }
+            } catch {
+                continue
             }
         }
     }

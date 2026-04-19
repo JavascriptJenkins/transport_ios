@@ -105,7 +105,16 @@ struct DeliveryScanView: View {
                     .foregroundColor(BuneColors.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+
+            deliveryEligibilityInfoBanner
+                .padding(.horizontal, 20)
+
+            if let error = viewModel.errorMessage {
+                deliveryEligibilityErrorBanner(error)
+                    .padding(.horizontal, 20)
+            }
 
             if viewModel.isLoading {
                 VStack(spacing: 16) {
@@ -115,32 +124,30 @@ struct DeliveryScanView: View {
                         .foregroundColor(BuneColors.textSecondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else if let error = viewModel.errorMessage {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 40))
-                        .foregroundColor(BuneColors.errorColor)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(BuneColors.errorColor)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .padding(20)
             } else if viewModel.availableTransfers.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "inbox")
                         .font(.system(size: 40))
                         .foregroundColor(BuneColors.textTertiary)
-                    Text("No transfers available")
+                    Text("No transfers ready for delivery")
                         .foregroundColor(BuneColors.textSecondary)
+                        .font(.subheadline)
+                    Text("A transfer appears here once the driver marks it delivered at the destination.")
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(BuneColors.textTertiary)
+                        .padding(.horizontal, 32)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     VStack(spacing: 12) {
                         ForEach(viewModel.availableTransfers) { transfer in
-                            DeliveryTransferSelectRow(transfer: transfer) {
+                            let blocked = DeliveryScanViewModel.deliveryBlockedReason(for: transfer)
+                            DeliveryTransferSelectRow(
+                                transfer: transfer,
+                                blockedReason: blocked
+                            ) {
                                 Task { await viewModel.startSession(transferId: transfer.id) }
                             }
                         }
@@ -151,6 +158,64 @@ struct DeliveryScanView: View {
 
             Spacer()
         }
+    }
+
+    // MARK: - Eligibility banners
+
+    private var deliveryEligibilityInfoBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .foregroundColor(BuneColors.accentPrimary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Only delivered transfers can be handed off")
+                    .font(.caption.bold())
+                    .foregroundColor(BuneColors.textPrimary)
+                Text("Transfers show up here once the driver marks them delivered at the destination. Anything still in transit or at a hub needs to complete its earlier stage first.")
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.textSecondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(BuneColors.accentPrimary.opacity(0.15))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(BuneColors.accentPrimary.opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+
+    private func deliveryEligibilityErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(Color(red: 1.0, green: 0.6, blue: 0.3))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Can't start delivery")
+                    .font(.caption.bold())
+                    .foregroundColor(BuneColors.textPrimary)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundColor(BuneColors.textSecondary)
+            }
+            Spacer()
+            Button {
+                viewModel.errorMessage = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(BuneColors.textTertiary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(red: 0.3, green: 0.15, blue: 0.05).opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(red: 0.95, green: 0.61, blue: 0.07).opacity(0.35), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Phase 2: Scanning
@@ -536,6 +601,10 @@ struct DeliveryScanView: View {
 
 private struct DeliveryTransferSelectRow: View {
     let transfer: Transfer
+    /// When non-nil, the row is dimmed and tapping surfaces the reason
+    /// instead of starting a session. nil means the transfer is delivered
+    /// and ready for handoff.
+    let blockedReason: String?
     let onTap: () -> Void
 
     var body: some View {
@@ -548,16 +617,7 @@ private struct DeliveryTransferSelectRow: View {
                             .fontWeight(.semibold)
                             .foregroundColor(BuneColors.textPrimary)
 
-                        if transfer.status == "IN_TRANSIT" {
-                            Label("In Transit", systemImage: "truck.box.fill")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(BuneColors.infoColor)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(BuneColors.infoColor.opacity(0.15))
-                                .cornerRadius(6)
-                        }
+                        statusChip
                     }
 
                     HStack(spacing: 16) {
@@ -581,17 +641,52 @@ private struct DeliveryTransferSelectRow: View {
                                 .foregroundColor(BuneColors.textSecondary)
                         }
                     }
+
+                    if let reason = blockedReason {
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundColor(Color(red: 1.0, green: 0.6, blue: 0.3))
+                            .padding(.top, 2)
+                    }
                 }
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
+                Image(systemName: blockedReason == nil ? "chevron.right" : "lock.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(BuneColors.textTertiary)
             }
             .padding(14)
             .glassCard(cornerRadius: 14)
+            .opacity(blockedReason == nil ? 1.0 : 0.75)
         }
+    }
+
+    private var statusChip: some View {
+        let label = transfer.status
+        let (fg, bg): (Color, Color) = {
+            switch transfer.status.uppercased() {
+            case "DELIVERED":
+                return (BuneColors.statusDelivered, BuneColors.statusDelivered.opacity(0.18))
+            case "IN_TRANSIT", "EN_ROUTE":
+                return (BuneColors.statusInTransit, BuneColors.statusInTransit.opacity(0.18))
+            case "DISPATCH":
+                return (BuneColors.statusDispatch, BuneColors.statusDispatch.opacity(0.18))
+            case "AT_HUB", "AT HUB":
+                return (BuneColors.statusAtHub, BuneColors.statusAtHub.opacity(0.18))
+            case "CREATED":
+                return (BuneColors.warningColor, BuneColors.warningColor.opacity(0.18))
+            default:
+                return (BuneColors.textTertiary, Color.white.opacity(0.08))
+            }
+        }()
+        return Text(label)
+            .font(.caption2.bold())
+            .foregroundColor(fg)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(bg)
+            .cornerRadius(6)
     }
 }
 

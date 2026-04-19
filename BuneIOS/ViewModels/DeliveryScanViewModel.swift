@@ -51,11 +51,54 @@ class DeliveryScanViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Eligibility
+
+    /// Raw / label statuses that indicate the transfer is at its destination
+    /// and awaiting handoff. Matches the backend
+    /// DeliveryHandoffController filter:
+    ///     transferRepo.findByTulipStatusIn(['DELIVERED'])
+    private static let deliveryEligibleTokens: Set<String> = [
+        "DELIVERED"
+    ]
+
+    static func deliveryBlockedReason(for transfer: Transfer) -> String? {
+        let normalized = transfer.status.uppercased()
+        if deliveryEligibleTokens.contains(normalized) { return nil }
+
+        switch normalized {
+        case "CREATED":
+            return "This transfer hasn't been dispatched yet — nothing to hand off."
+        case "DISPATCH", "STAGED FOR PICKUP", "EN ROUTE TO PICKUP":
+            return "This transfer hasn't been picked up yet. Complete pickup before starting the delivery handoff."
+        case "IN_TRANSIT", "EN_ROUTE":
+            return "This transfer is still in transit. Mark it delivered at the destination before starting the handoff."
+        case "AT_HUB", "AT HUB":
+            return "This transfer is at a hub — complete hub intake and continue the trip before handoff."
+        case "ACCEPTED":
+            return "This transfer has already been accepted by the recipient."
+        case "CANCELED", "CANCELLED":
+            return "This transfer was canceled."
+        default:
+            return "Transfer can't be delivered while it's in “\(transfer.status)” status."
+        }
+    }
+
     // MARK: - Session Management
 
     func startSession(transferId: Int) async {
-        isLoading = true
         errorMessage = nil
+
+        // Belt-and-braces guard: the backend already narrows its delivery
+        // list to DELIVERED-status transfers, but a stale / cached row
+        // could slip through. Block the request client-side so the user
+        // gets a clear status-specific message instead of a generic error.
+        if let transfer = availableTransfers.first(where: { $0.id == transferId }),
+           let reason = Self.deliveryBlockedReason(for: transfer) {
+            errorMessage = reason
+            return
+        }
+
+        isLoading = true
 
         do {
             let session = try await apiClient.startDeliverySession(transferId: transferId)
