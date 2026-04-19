@@ -160,11 +160,20 @@ class AuthService: ObservableObject {
         }
         accessToken = access
         refreshToken = response.refreshToken
+
+        // IMPORTANT: set userRoles BEFORE saveTokens() — saveTokens writes the
+        // roles array to UserDefaults, so it has to be up to date first.
+        // Previously this was ordered the other way and every login persisted
+        // an empty roles array, which meant tabs gated on canScan /
+        // canCreateTransfers disappeared on the next launch.
+        let roles = (response.scope?
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }) ?? []
+        self.userRoles = roles
+
         saveTokens(access: access, refresh: response.refreshToken)
         isAuthenticated = true
 
-        let roles = response.scope?.components(separatedBy: " ") ?? []
-        self.userRoles = roles
         let expiresAt = response.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
         self.currentSession = UserSession(
             accessToken: access,
