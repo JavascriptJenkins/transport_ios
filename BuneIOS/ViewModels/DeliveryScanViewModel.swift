@@ -217,15 +217,24 @@ class DeliveryScanViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            let result = try await apiClient.completeDelivery(
+            _ = try await apiClient.completeDelivery(
                 sessionId: session.sessionId,
                 signatureData: signatureData,
                 signerName: signerName
             )
 
-            // Update transfer status to DELIVERED
+            // Use the guarded public-tracking endpoint instead of a raw
+            // tulipStatus write. markDelivered requires the backend's
+            // TransportStatusService.isInTransit() — i.e. all packages are
+            // physically in the vehicle — so this call fails fast if zone
+            // state doesn't back a DELIVERED transition.
             if let transferId = selectedTransfer?.id {
-                _ = try await apiClient.updateTransferStatus(id: transferId, status: "DELIVERED")
+                let ack = try await apiClient.markDelivered(transferId: transferId)
+                if !ack.success && ack.alreadyDelivered != true {
+                    errorMessage = ack.error ?? "Failed to mark transfer delivered"
+                    isLoading = false
+                    return
+                }
             }
 
             // Store receipt (in a real app, this would come from the API response)

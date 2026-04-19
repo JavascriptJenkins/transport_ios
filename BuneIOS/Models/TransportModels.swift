@@ -155,8 +155,12 @@ struct Transfer: Codable, Identifiable {
 
         manifestNumber = try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "manifestNumber")!)
 
-        // Status: try "status", "tulipStatus", "statusLabel"
-        status = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "status")!))
+        // Status: prefer `effectiveStatus` (zone-computed on the V1 DTO)
+        // so the list never claims IN_TRANSIT for a transfer whose
+        // packages are still in the originator. Fall back to plain
+        // `status`, then the raw `tulipStatus`, then `statusLabel`.
+        status = (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "effectiveStatus")!))
+            ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "status")!))
             ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "tulipStatus")!))
             ?? (try? container.decode(String.self, forKey: FlexibleCodingKeys(stringValue: "statusLabel")!))
             ?? "UNKNOWN"

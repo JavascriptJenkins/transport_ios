@@ -226,10 +226,13 @@ class PickupScanViewModel: ObservableObject {
         do {
             _ = try await apiClient.completePickup(sessionId: session.sessionId)
 
-            // Update transfer status to IN_TRANSIT
-            if let transferId = selectedTransfer?.id {
-                _ = try await apiClient.updateTransferStatus(id: transferId, status: "IN_TRANSIT")
-            }
+            // Don't force tulipStatus = IN_TRANSIT here. Effective status is
+            // zone-derived — the backend's TransportStatusService returns
+            // IN_TRANSIT only when every package is physically in a VEHICLE
+            // zone (or vehicle-package assignment). Writing IN_TRANSIT into
+            // tulipStatus would pollute the stored value and let the V1 list
+            // endpoint show IN_TRANSIT for a transfer whose packages are
+            // still in the originator.
 
             currentPhase = .complete
             isLoading = false
