@@ -11,6 +11,7 @@ import SwiftUI
 
 struct ScanPhaseView: View {
     @ObservedObject var viewModel: SessionBuilderViewModel
+    let apiClient: TransportAPIClient
     @State private var scanInput: String = ""
     @State private var showPackageBrowser = false
 
@@ -166,9 +167,9 @@ struct ScanPhaseView: View {
             }
         }
         .sheet(isPresented: $showPackageBrowser) {
-            Text("Package browser coming soon")
-                .font(.headline)
-                .padding()
+            PackageBrowserSheet(apiClient: apiClient) { pkg in
+                await viewModel.addPackage(tag: pkg.packageLabel)
+            }
         }
     }
 }
@@ -252,6 +253,6 @@ struct RoundedCorner: Shape {
     ZStack {
         BuneColors.backgroundPrimary.ignoresSafeArea()
 
-        ScanPhaseView(viewModel: viewModel)
+        ScanPhaseView(viewModel: viewModel, apiClient: mockAPIClient)
     }
 }

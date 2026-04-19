@@ -756,6 +756,47 @@ class TransportAPIClient: ObservableObject {
         return try JSONDecoder().decode(PackageMedia.self, from: data)
     }
 
+    // MARK: - Package Browse / Search
+    //
+    // Both browse and search live on the dashboard controller and return
+    // JSON envelopes of the form { success, packages: [...] }. Field names
+    // differ slightly between the two, so we decode into a common shape.
+
+    /// Full inventory for the active license (or a given one). Backend:
+    /// GET /transport/api/packages/browse?licenseNumber=&allowNotSubmitted=
+    func browsePackages(licenseNumber: String? = nil, allowNotSubmitted: Bool = false) async throws -> [BrowsablePackage] {
+        var path = "/transport/api/packages/browse?allowNotSubmitted=\(allowNotSubmitted)"
+        if let licenseNumber = licenseNumber, !licenseNumber.isEmpty {
+            let encoded = licenseNumber.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? licenseNumber
+            path += "&licenseNumber=\(encoded)"
+        }
+        struct BrowseEnvelope: Decodable {
+            let success: Bool?
+            let packages: [BrowsablePackage.BrowseShape]?
+        }
+        let envelope: BrowseEnvelope = try await get(path: path)
+        return (envelope.packages ?? []).map { $0.normalized }
+    }
+
+    /// Free-text search. Minimum 2 characters, max 20 results. Backend:
+    /// GET /transport/api/search-packages?q=&licenseNumber=&includeNotSubmitted=
+    func searchPackages(query: String, licenseNumber: String? = nil, includeNotSubmitted: Bool = false) async throws -> [BrowsablePackage] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else { return [] }
+        let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
+        var path = "/transport/api/search-packages?q=\(encodedQuery)&includeNotSubmitted=\(includeNotSubmitted)"
+        if let licenseNumber = licenseNumber, !licenseNumber.isEmpty {
+            let encodedLicense = licenseNumber.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? licenseNumber
+            path += "&licenseNumber=\(encodedLicense)"
+        }
+        struct SearchEnvelope: Decodable {
+            let success: Bool?
+            let packages: [BrowsablePackage.SearchShape]?
+        }
+        let envelope: SearchEnvelope = try await get(path: path)
+        return (envelope.packages ?? []).map { $0.normalized }
+    }
+
     // MARK: - Session from Template (duplicate transfer)
 
     /// Create a new editable session seeded from an existing transfer's

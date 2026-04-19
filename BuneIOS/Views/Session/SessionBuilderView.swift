@@ -11,9 +11,11 @@ import SwiftUI
 
 struct SessionBuilderView: View {
     @StateObject private var viewModel: SessionBuilderViewModel
+    private let apiClient: TransportAPIClient
     @Environment(\.dismiss) var dismiss
 
     init(apiClient: TransportAPIClient) {
+        self.apiClient = apiClient
         _viewModel = StateObject(wrappedValue: SessionBuilderViewModel(apiClient: apiClient))
     }
 
@@ -31,7 +33,7 @@ struct SessionBuilderView: View {
 
                         switch viewModel.currentPhase {
                         case .scan:
-                            ScanPhaseView(viewModel: viewModel)
+                            ScanPhaseView(viewModel: viewModel, apiClient: apiClient)
                         case .configure:
                             ConfigurePhaseView(viewModel: viewModel)
                         case .review:
