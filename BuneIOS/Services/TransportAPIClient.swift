@@ -458,8 +458,10 @@ class TransportAPIClient: ObservableObject {
     // MARK: - Pickup Scan
 
     func listPickupTransfers() async throws -> [Transfer] {
-        let response: TransferListResponse = try await get(path: "/transport/pickup/api/transfers")
-        return response.allTransfers
+        // Returns a flat array under `transfers`, not the dashboard's grouped
+        // dictionary. See FlatTransferListResponse for the shape.
+        let response: FlatTransferListResponse = try await get(path: "/transport/pickup/api/transfers")
+        return response.transfers ?? []
     }
 
     func startPickupSession(transferId: Int) async throws -> Session {
@@ -489,8 +491,10 @@ class TransportAPIClient: ObservableObject {
     // MARK: - Delivery Scan
 
     func listDeliveryTransfers() async throws -> [Transfer] {
-        let response: TransferListResponse = try await get(path: "/transport/delivery/api/transfers")
-        return response.allTransfers
+        // Same flat-array shape as the pickup list — not the grouped
+        // dashboard dictionary.
+        let response: FlatTransferListResponse = try await get(path: "/transport/delivery/api/transfers")
+        return response.transfers ?? []
     }
 
     func startDeliverySession(transferId: Int) async throws -> Session {

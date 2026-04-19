@@ -13,11 +13,17 @@ struct APIResponse<T: Decodable>: Decodable {
     let timestamp: String?
 }
 
-/// Response format for transfer list endpoints:
+/// Response format for the dashboard transfer list endpoint:
 /// `{"success": true, "transfers": {"TEMPLATE_OUTGOING": [...], "OUTGOING": [...], "INCOMING": [...], "HUB": [...]}}`.
 ///
 /// Backend ignores query parameters — the whole dictionary is always returned
 /// — so direction filtering has to happen client-side against the group keys.
+///
+/// NOTE: Pickup and Delivery list endpoints return a FLAT array instead
+/// (`{"success":true, "transfers":[...]}`). Use `FlatTransferListResponse`
+/// for those. Tagged enum-style decoder below tolerates either shape so
+/// callers can share the type, but if you know the shape up front prefer
+/// the specific struct.
 struct TransferListResponse: Decodable {
     let success: Bool
     let transfers: [String: [Transfer]]?
@@ -37,6 +43,15 @@ struct TransferListResponse: Decodable {
         guard let transfers = transfers else { return [] }
         return transfers.values.flatMap { $0 }
     }
+}
+
+/// Response format for the pickup + delivery list endpoints which return a
+/// flat array instead of the dashboard's grouped dictionary:
+/// `{"success": true, "transfers": [...]}`.
+struct FlatTransferListResponse: Decodable {
+    let success: Bool
+    let transfers: [Transfer]?
+    let error: String?
 }
 
 struct PaginatedResponse<T: Decodable>: Decodable {
