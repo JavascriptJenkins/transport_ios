@@ -288,10 +288,11 @@ struct DeliveryScanView: View {
                             ForEach(Array(session.packages.enumerated()), id: \.element.label) { _, pkg in
                                 DeliveryPackageRow(
                                     package: pkg,
+                                    onScan: {
+                                        Task { await viewModel.scanPackage(pkg.label) }
+                                    },
                                     onUnscan: {
-                                        Task {
-                                            await viewModel.unscanPackage(pkg.label)
-                                        }
+                                        Task { await viewModel.unscanPackage(pkg.label) }
                                     }
                                 )
                             }
@@ -596,56 +597,70 @@ private struct DeliveryTransferSelectRow: View {
 
 private struct DeliveryPackageRow: View {
     let package: ScanPackage
+    let onScan: () -> Void
     let onUnscan: () -> Void
 
     @State private var showUnscanConfirm = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            if package.scanned {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(BuneColors.successColor)
-            } else {
-                Image(systemName: "circle")
-                    .font(.system(size: 18))
-                    .foregroundColor(BuneColors.textTertiary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(package.label)
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.semibold)
-                    .foregroundColor(BuneColors.textPrimary)
-
-                if let productName = package.productName {
-                    Text(productName)
-                        .font(.caption2)
-                        .foregroundColor(BuneColors.textSecondary)
-                }
-            }
-
-            Spacer()
-
-            if package.scanned {
-                Button(action: { showUnscanConfirm = true }) {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 16))
+        Button {
+            if !package.scanned { onScan() }
+        } label: {
+            HStack(spacing: 12) {
+                if package.scanned {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(BuneColors.successColor)
+                } else {
+                    Image(systemName: "circle")
+                        .font(.system(size: 18))
                         .foregroundColor(BuneColors.textTertiary)
                 }
-                .alert("Unscan Package?", isPresented: $showUnscanConfirm) {
-                    Button("Unscan", role: .destructive) {
-                        onUnscan()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(package.label)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.semibold)
+                        .foregroundColor(BuneColors.textPrimary)
+
+                    if let productName = package.productName {
+                        Text(productName)
+                            .font(.caption2)
+                            .foregroundColor(BuneColors.textSecondary)
                     }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Remove \(package.label) from scanned list?")
+                }
+
+                Spacer()
+
+                if package.scanned {
+                    Button(action: { showUnscanConfirm = true }) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 16))
+                            .foregroundColor(BuneColors.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .alert("Unscan Package?", isPresented: $showUnscanConfirm) {
+                        Button("Unscan", role: .destructive) { onUnscan() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Remove \(package.label) from scanned list?")
+                    }
+                } else {
+                    Text("Tap to scan")
+                        .font(.caption2)
+                        .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
                 }
             }
+            .padding(12)
+            .background(
+                package.scanned
+                    ? BuneColors.successColor.opacity(0.08)
+                    : Color.white.opacity(0.05)
+            )
+            .cornerRadius(12)
         }
-        .padding(12)
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(12)
+        .buttonStyle(.plain)
+        .disabled(package.scanned)
     }
 }
 

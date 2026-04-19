@@ -350,21 +350,29 @@ struct HubIntakeView: View {
                     .padding(.horizontal, 20)
             }
 
-            // Recently scanned list (this session only)
+            // Package checklist — tap to scan each package into the chosen
+            // zone. The transfer's full package list is fetched when the
+            // session starts; rows the user has already scanned in this
+            // session render as checked off.
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    ForEach(viewModel.scannedLabels.reversed(), id: \.self) { label in
-                        HStack(spacing: 10) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(BuneColors.statusDelivered)
-                            Text(label)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundColor(BuneColors.textPrimary)
-                            Spacer()
+                    if viewModel.transferPackages.isEmpty {
+                        // Backend package list hasn't loaded (or is empty for
+                        // this transfer). Fall back to the "recently scanned"
+                        // log so the user still sees progress.
+                        ForEach(viewModel.scannedLabels.reversed(), id: \.self) { label in
+                            scannedChip(label)
                         }
-                        .padding(10)
-                        .background(BuneColors.backgroundTertiary.opacity(0.4))
-                        .cornerRadius(8)
+                    } else {
+                        ForEach(viewModel.transferPackages, id: \.id) { pkg in
+                            HubIntakePackageRow(
+                                packageLabel: pkg.packageLabel,
+                                productName: pkg.productName,
+                                scanned: viewModel.scannedLabels.contains(pkg.packageLabel)
+                            ) {
+                                Task { await viewModel.scanPackage(pkg.packageLabel) }
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -481,5 +489,75 @@ struct HubIntakeView: View {
         .padding(24)
         .background(BuneColors.backgroundTertiary.opacity(0.3))
         .cornerRadius(12)
+    }
+
+    /// Small row used when the transfer package list couldn't load —
+    /// mirrors the original "recently scanned" chip style.
+    private func scannedChip(_ label: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(BuneColors.statusDelivered)
+            Text(label)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(BuneColors.textPrimary)
+            Spacer()
+        }
+        .padding(10)
+        .background(BuneColors.backgroundTertiary.opacity(0.4))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Hub Intake Package Row
+
+/// Tappable package checklist row matching the pickup/delivery row styling.
+/// Tap an unscanned row to invoke the caller's onScan closure which runs
+/// scanIntoZone under the hood. Scanned rows are visually checked off and
+/// inert so rapid list-tapping doesn't accidentally re-trigger a scan.
+private struct HubIntakePackageRow: View {
+    let packageLabel: String
+    let productName: String?
+    let scanned: Bool
+    let onScan: () -> Void
+
+    var body: some View {
+        Button {
+            if !scanned { onScan() }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: scanned ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundColor(scanned ? BuneColors.statusDelivered : BuneColors.textTertiary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(packageLabel)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.semibold)
+                        .foregroundColor(BuneColors.textPrimary)
+                    if let productName = productName, !productName.isEmpty {
+                        Text(productName)
+                            .font(.caption2)
+                            .foregroundColor(BuneColors.textSecondary)
+                    }
+                }
+
+                Spacer()
+
+                if !scanned {
+                    Text("Tap to scan")
+                        .font(.caption2)
+                        .foregroundColor(BuneColors.accentPrimary.opacity(0.8))
+                }
+            }
+            .padding(12)
+            .background(
+                scanned
+                    ? BuneColors.statusDelivered.opacity(0.10)
+                    : Color.white.opacity(0.05)
+            )
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .disabled(scanned)
     }
 }

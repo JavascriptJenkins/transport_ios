@@ -44,6 +44,10 @@ class HubIntakeViewModel: ObservableObject {
     /// it just now" on the UI — the server-side assignedCount counts both.
     @Published var scannedLabels: [String] = []
 
+    /// Full package list for the active transfer, so the scanning phase can
+    /// render a tappable checklist. Populated when the session starts.
+    @Published var transferPackages: [Package] = []
+
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var statusAdvanced: Bool = false
@@ -159,6 +163,16 @@ class HubIntakeViewModel: ObservableObject {
             wasResumed = result.resumed
             scannedLabels = []
             phase = .scanning
+
+            // Fetch the transfer's package list so the UI can render a
+            // tappable checklist in the scanning phase. Silent on failure —
+            // the manual barcode input still works without it.
+            do {
+                transferPackages = try await apiClient.getTransferPackages(transferId: transfer.id)
+            } catch {
+                transferPackages = []
+            }
+
             startProgressPolling()
         } catch {
             errorMessage = "Failed to start hub intake: \(error.localizedDescription)"
@@ -254,6 +268,7 @@ class HubIntakeViewModel: ObservableObject {
         session = nil
         wasResumed = false
         scannedLabels = []
+        transferPackages = []
         statusAdvanced = false
         errorMessage = nil
     }
