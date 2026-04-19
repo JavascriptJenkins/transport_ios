@@ -13,13 +13,26 @@ struct APIResponse<T: Decodable>: Decodable {
     let timestamp: String?
 }
 
-/// Response format for transfer list endpoints: {"success": true, "transfers": {"TEMPLATE_TYPE": [...]}}
+/// Response format for transfer list endpoints:
+/// `{"success": true, "transfers": {"TEMPLATE_OUTGOING": [...], "OUTGOING": [...], "INCOMING": [...], "HUB": [...]}}`.
+///
+/// Backend ignores query parameters — the whole dictionary is always returned
+/// — so direction filtering has to happen client-side against the group keys.
 struct TransferListResponse: Decodable {
     let success: Bool
     let transfers: [String: [Transfer]]?
     let error: String?
 
-    /// Flattens the grouped transfers into a single array
+    /// Returns the transfers under a single group key (matches backend naming:
+    /// OUTGOING, INCOMING, HUB, TEMPLATE_OUTGOING). Returns an empty array if
+    /// the group is missing from the response.
+    func transfers(inGroup group: String) -> [Transfer] {
+        transfers?[group] ?? []
+    }
+
+    /// Flattens every group into a single array. Use sparingly — most call
+    /// sites should scope to a specific group instead so that, for example,
+    /// TEMPLATE_OUTGOING drafts don't leak into the HUB tab.
     var allTransfers: [Transfer] {
         guard let transfers = transfers else { return [] }
         return transfers.values.flatMap { $0 }

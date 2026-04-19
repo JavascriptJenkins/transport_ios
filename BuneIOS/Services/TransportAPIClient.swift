@@ -332,25 +332,39 @@ class TransportAPIClient: ObservableObject {
         size: Int? = nil,
         status: String? = nil
     ) async throws -> [Transfer] {
-        // Dashboard list endpoint (grouped by direction) — works and has special response format
-        var path = "/transport/api/transfers"
-        var components = URLComponents()
+        // Dashboard list endpoint. The backend returns the full dictionary
+        // grouped by direction and ignores query parameters, so we request
+        // once and slice client-side.
+        let response: TransferListResponse = try await get(path: "/transport/api/transfers")
 
-        var queryItems: [URLQueryItem] = []
-        if let direction = direction { queryItems.append(URLQueryItem(name: "direction", value: direction)) }
-        if let page = page { queryItems.append(URLQueryItem(name: "page", value: String(page))) }
-        if let size = size { queryItems.append(URLQueryItem(name: "size", value: String(size))) }
-        if let status = status { queryItems.append(URLQueryItem(name: "status", value: status)) }
-
-        if !queryItems.isEmpty {
-            components.queryItems = queryItems
-            if let query = components.query {
-                path += "?\(query)"
-            }
+        // Start from the selected group (or every group when no direction is
+        // specified). Intentionally scopes to one key so the HUB tab doesn't
+        // show OUTGOING or TEMPLATE_OUTGOING rows.
+        var result: [Transfer]
+        if let direction = direction {
+            result = response.transfers(inGroup: direction)
+        } else {
+            result = response.allTransfers
         }
 
-        let response: TransferListResponse = try await get(path: path)
-        return response.allTransfers
+        // Apply status filter client-side (comma-separated allowed).
+        if let status = status, !status.isEmpty {
+            let allowed = Set(status.split(separator: ",").map { String($0).uppercased() })
+            result = result.filter { allowed.contains($0.status.uppercased()) }
+        }
+
+        // Simulate pagination over the client-side slice so the caller's
+        // pagination state continues to make sense.
+        if let page = page, let size = size, size > 0 {
+            let start = page * size
+            if start >= result.count {
+                return []
+            }
+            let end = min(start + size, result.count)
+            result = Array(result[start..<end])
+        }
+
+        return result
     }
 
     // MCP: GET /api/v1/transport/{id}  (no /transfers/ segment)

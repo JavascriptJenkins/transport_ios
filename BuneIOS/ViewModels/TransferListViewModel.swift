@@ -9,22 +9,33 @@ import Foundation
 import SwiftUI
 
 // MARK: - Category Enum
+//
+// Raw values map to the backend's direction-group keys on
+// GET /transport/api/transfers. Active Trips doesn't have its own
+// backend group — it's every non-terminal transfer across groups
+// filtered client-side by status.
 enum TransferCategory: String, CaseIterable {
+    case hub = "HUB"
     case outgoing = "OUTGOING"
     case incoming = "INCOMING"
-    case hub = "AT_HUB"
-    case activeTrips = "IN_TRANSIT"
+    case activeTrips = "ACTIVE"
 
     var displayName: String {
         switch self {
-        case .outgoing:
-            return "Outgoing"
-        case .incoming:
-            return "Incoming"
-        case .hub:
-            return "Hub"
-        case .activeTrips:
-            return "Active"
+        case .hub: return "Hub"
+        case .outgoing: return "Outgoing"
+        case .incoming: return "Incoming"
+        case .activeTrips: return "Active"
+        }
+    }
+
+    /// The backend group key for this category, or nil when the category
+    /// spans multiple groups (Active Trips — every in-flight transfer
+    /// regardless of direction).
+    var backendGroup: String? {
+        switch self {
+        case .hub, .outgoing, .incoming: return rawValue
+        case .activeTrips: return nil
         }
     }
 }
@@ -38,8 +49,9 @@ class TransferListViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    // Filter state
-    @Published var selectedCategory: TransferCategory = .outgoing
+    // Filter state — default to Hub Transfers since that's the primary
+    // operational view for the current workflow.
+    @Published var selectedCategory: TransferCategory = .hub
     @Published var selectedStatuses: Set<String> = []
     @Published var searchText: String = ""
     @Published var dateRange: (start: Date?, end: Date?) = (nil, nil)
@@ -151,17 +163,22 @@ class TransferListViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            // Build status parameter from selected statuses
+            // Build status parameter. Active Trips is really a
+            // "in-flight across all directions" view, so when no explicit
+            // status filter is applied we narrow it to IN_TRANSIT.
             let statusParam: String?
             if !selectedStatuses.isEmpty {
                 statusParam = selectedStatuses.joined(separator: ",")
+            } else if selectedCategory == .activeTrips {
+                statusParam = "IN_TRANSIT"
             } else {
                 statusParam = nil
             }
 
-            // Call API with current filters
+            // Direction group narrows the backend response — nil for
+            // Active Trips (which spans OUTGOING + INCOMING + HUB).
             let result: [Transfer] = try await apiClient.listTransfers(
-                direction: selectedCategory.rawValue,
+                direction: selectedCategory.backendGroup,
                 page: currentPage,
                 size: pageSize,
                 status: statusParam
