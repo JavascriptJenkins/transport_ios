@@ -22,7 +22,7 @@ struct MainTabView: View {
             if let apiClient = apiClient {
                 TabView(selection: $selectedTab) {
                     // Tab 1: Dashboard/Transfers — everyone sees this
-                    TransferListView(apiClient: apiClient)
+                    TransferListView(apiClient: apiClient, notificationService: notificationService)
                         .tabItem { Label("Transfers", systemImage: "shippingbox") }
                         .tag(0)
 

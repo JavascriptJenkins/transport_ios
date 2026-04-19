@@ -14,9 +14,14 @@ struct TransferListView: View {
 
     private let apiClient: TransportAPIClient
 
-    init(apiClient: TransportAPIClient) {
+    init(apiClient: TransportAPIClient, notificationService: NotificationService? = nil) {
         self.apiClient = apiClient
-        _viewModel = StateObject(wrappedValue: TransferListViewModel(apiClient: apiClient))
+        _viewModel = StateObject(
+            wrappedValue: TransferListViewModel(
+                apiClient: apiClient,
+                notificationService: notificationService
+            )
+        )
     }
 
     var body: some View {

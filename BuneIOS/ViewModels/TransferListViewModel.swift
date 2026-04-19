@@ -53,6 +53,11 @@ class TransferListViewModel: ObservableObject {
     private let apiClient: TransportAPIClient
     private let pageSize = 20
 
+    /// Notification service used to (re)schedule ETA + overdue alerts each
+    /// time the list refreshes. Optional so previews / tests that don't
+    /// need alerts can skip it.
+    private let notificationService: NotificationService?
+
     private let statusOptions = [
         "CREATED",
         "DISPATCH",
@@ -64,8 +69,9 @@ class TransferListViewModel: ObservableObject {
     ]
 
     // MARK: - Init
-    init(apiClient: TransportAPIClient) {
+    init(apiClient: TransportAPIClient, notificationService: NotificationService? = nil) {
         self.apiClient = apiClient
+        self.notificationService = notificationService
     }
 
     // MARK: - Public Methods
@@ -157,6 +163,11 @@ class TransferListViewModel: ObservableObject {
             // Note: The API returns a flat array, so we estimate pagination
             hasMore = result.count == pageSize
             totalPages = (transfers.count + pageSize - 1) / pageSize
+
+            // Re-schedule ETA + overdue notifications against fresh data.
+            // Delivered / canceled transfers get their pending alerts canceled;
+            // active ones with an ETA get an "arriving soon" + "overdue" pair.
+            notificationService?.refreshScheduledAlerts(for: transfers)
 
         } catch {
             errorMessage = "Failed to load transfers: \(error.localizedDescription)"
