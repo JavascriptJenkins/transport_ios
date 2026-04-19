@@ -90,7 +90,7 @@ struct LiveTrackingView: View {
 
                                 Spacer()
 
-                                if viewModel.trackingStatus?.statusProgress ?? 0 > 80 {
+                                if viewModel.isOverdue {
                                     VStack(spacing: 4) {
                                         Text("OVERDUE")
                                             .font(.caption2)
@@ -115,7 +115,7 @@ struct LiveTrackingView: View {
                     }
 
                     // MARK: - Section 3: Transfer Info
-                    if let transfer = viewModel.trackingStatus {
+                    if viewModel.trackingDetails != nil {
                         VStack(spacing: 16) {
                             // Manifest
                             VStack(alignment: .leading, spacing: 4) {
@@ -453,15 +453,39 @@ struct LiveTrackingView: View {
         .navigationTitle("Live Tracking")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await viewModel.loadStatus()
-            viewModel.startPolling()
-            gpsService.requestPermission()
             // Attach the persistent offline queue before tracking starts so
             // the very first ping failure already has a durable destination.
             gpsService.configure(offlineSyncService: offlineSyncService)
-            if let status = viewModel.trackingStatus?.status,
-               status.uppercased() == "IN_TRANSIT" {
-                gpsService.startTracking(transferId: transferId, vehicleId: 0, apiClient: apiClient)
+            gpsService.requestPermission()
+
+            // Await the initial status/details load BEFORE checking state —
+            // startPolling() kicks off a background load but doesn't return
+            // one, so a race was leaving status nil here and GPS was never
+            // starting for an IN_TRANSIT transfer.
+            await viewModel.loadStatus()
+            viewModel.startPolling()
+
+            if viewModel.trackingStatus?.status.uppercased() == "IN_TRANSIT" {
+                gpsService.startTracking(
+                    transferId: transferId,
+                    vehicleId: viewModel.vehicleId,
+                    apiClient: apiClient
+                )
+            }
+        }
+        .onChange(of: viewModel.trackingStatus?.status) { _, newStatus in
+            // Status can transition to IN_TRANSIT while the view is open
+            // (e.g. right after a successful Depart). Start GPS here so the
+            // driver doesn't need to close and reopen the screen.
+            guard let status = newStatus?.uppercased() else { return }
+            if status == "IN_TRANSIT" && !gpsService.isTracking {
+                gpsService.startTracking(
+                    transferId: transferId,
+                    vehicleId: viewModel.vehicleId,
+                    apiClient: apiClient
+                )
+            } else if status != "IN_TRANSIT" && gpsService.isTracking {
+                gpsService.stopTracking()
             }
         }
         .onDisappear {

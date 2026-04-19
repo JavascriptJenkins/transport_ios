@@ -750,25 +750,45 @@ class TransportAPIClient: ObservableObject {
     }
 
     // MARK: - Tracking (Public)
+    //
+    // PublicTransferTrackingController reads transferId from either a query
+    // param (GET) or the JSON body (POST) — never from the path. Field names
+    // on the ping body are lat/lon (the backend does not accept lng).
 
-    func getTrackingStatus(transferId: Int) async throws -> Transfer {
-        try await get(path: "/public/transfer/track/\(transferId)/status")
+    func getTrackingStatus(transferId: Int) async throws -> PublicTrackingStatus {
+        try await get(path: "/public/transfer/track/status?transferId=\(transferId)")
     }
 
-    func departTransfer(transferId: Int) async throws -> Transfer {
-        return try await post(path: "/public/transfer/track/\(transferId)/depart", body: nil)
+    func getTrackingDetails(transferId: Int) async throws -> PublicTrackingDetails {
+        try await get(path: "/public/transfer/track/details?transferId=\(transferId)")
     }
 
-    func markDelivered(transferId: Int) async throws -> Transfer {
-        return try await post(path: "/public/transfer/track/\(transferId)/delivered", body: nil)
+    func departTransfer(transferId: Int) async throws -> TrackingActionResponse {
+        struct DepartRequest: Encodable { let transferId: Int }
+        return try await post(
+            path: "/public/transfer/track/depart",
+            body: DepartRequest(transferId: transferId)
+        )
     }
 
-    func pingLocation(transferId: Int, lat: Double, lng: Double) async throws -> GPSPingResponse {
-        struct LocationRequest: Encodable {
+    func markDelivered(transferId: Int) async throws -> TrackingActionResponse {
+        struct DeliveredRequest: Encodable { let transferId: Int }
+        return try await post(
+            path: "/public/transfer/track/mark-delivered",
+            body: DeliveredRequest(transferId: transferId)
+        )
+    }
+
+    func pingLocation(transferId: Int, lat: Double, lon: Double) async throws -> TrackingActionResponse {
+        struct PingRequest: Encodable {
+            let transferId: Int
             let lat: Double
-            let lng: Double
+            let lon: Double
         }
-        return try await post(path: "/public/transfer/track/\(transferId)/ping", body: LocationRequest(lat: lat, lng: lng))
+        return try await post(
+            path: "/public/transfer/track/ping",
+            body: PingRequest(transferId: transferId, lat: lat, lon: lon)
+        )
     }
 
     // MARK: - Action Log

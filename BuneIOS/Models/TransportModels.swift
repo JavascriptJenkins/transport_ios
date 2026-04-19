@@ -684,7 +684,69 @@ struct ChatMessage: Codable, Identifiable {
 }
 
 // MARK: - Public Tracking
+//
+// Three separate shapes on the /public/transfer/track surface:
+//   1. PublicTrackingStatus — lightweight progress / status (polled)
+//   2. PublicTrackingDetails — manifest / parties / driver / vehicle
+//   3. TrackingActionResponse — generic {success, error?} envelope for
+//      depart / mark-delivered / ping action posts
+//
+// Backend uses query params on GET and JSON body on POST; nothing here
+// is path-parameterized, and the JSON field names ARE lat/lon (not lng).
 
+struct PublicTrackingStatus: Decodable {
+    let success: Bool?
+    let status: String
+    let storedStatus: String?
+    let statusLabel: String?
+    let progress: Int?
+    let step: Int?
+    let metrcState: String?
+    let etaDisplay: String?
+    let overdue: Bool?
+    let departed: Bool?
+    let departedAt: String?
+    let messageCount: Int?
+    let updatedAt: String?
+}
+
+struct PublicTrackingDetails: Decodable {
+    let success: Bool?
+    let manifestNumber: String?
+    let shipperName: String?
+    let shipperLicense: String?
+    let receiverName: String?
+    let receiverLicense: String?
+    let driverName: String?
+    let driverLicense: String?
+    let transporterName: String?
+    let vehicleMake: String?
+    let vehicleModel: String?
+    let vehiclePlate: String?
+    let plannedRoute: String?
+    let estimatedDeparture: String?
+    let estimatedArrival: String?
+    let actualDeparture: String?
+    let actualArrival: String?
+    let packageCount: Int?
+}
+
+/// Envelope used by the depart / mark-delivered / ping endpoints. Each
+/// returns at minimum success + error; the rest are action-specific.
+struct TrackingActionResponse: Decodable {
+    let success: Bool
+    let error: String?
+    let status: String?
+    let departed: Bool?
+    let alreadyDelivered: Bool?
+    /// ping response fields
+    let pingId: Int?
+    let vehicleFound: Bool?
+    let transfersLinked: Int?
+}
+
+// Legacy alias kept around so any stale references still compile.
+// Prefer PublicTrackingStatus for new code.
 struct TrackingStatus: Codable {
     let transferId: Int
     let status: String
