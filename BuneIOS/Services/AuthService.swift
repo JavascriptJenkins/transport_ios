@@ -105,9 +105,11 @@ class AuthService: ObservableObject {
 
             // If the server issued an MFA challenge, stash the mfa_token and
             // let the UI collect the TOTP code. No session is authenticated
-            // yet — isAuthenticated stays false.
+            // yet — isAuthenticated stays false. This is also a definitive
+            // signal that the user has 2FA on, so record it locally.
             if tokenResponse.isMFAChallenge, let mfaToken = tokenResponse.mfaToken {
                 pendingMFAToken = mfaToken
+                setTOTPEnabled(true)
                 isLoading = false
                 return
             }
@@ -257,6 +259,126 @@ class AuthService: ObservableObject {
         default:
             throw AuthError.serverError(http.statusCode)
         }
+    }
+
+    // MARK: - TOTP Enrollment / Management
+    //
+    // Backend:
+    //   POST /oauth2/totp/setup            — authenticated; emails first code
+    //   POST /oauth2/totp/verify-setup     — authenticated; activates 2FA with code
+    //   POST /oauth2/totp/disable          — authenticated; turns off with current code
+    //
+    // We also maintain a local `isTOTPEnabled` flag so the Settings screen
+    // can render the right action without an extra "get status" endpoint.
+    // This flag is best-effort: it flips to true after a successful
+    // verify-setup, false after disable, and is also set true opportunistically
+    // whenever the server challenges the current user with MFA at login.
+
+    private let totpEnabledKey = "com.buneios.totpEnabled"
+
+    /// Best-effort local record of whether the user has 2FA enabled.
+    /// Prefer reading via `isTOTPEnabled` on the main actor.
+    @Published var isTOTPEnabled: Bool = UserDefaults.standard.bool(forKey: "com.buneios.totpEnabled")
+
+    /// Trigger enrollment. Backend emails a verification code to the user's
+    /// address. Call `completeTOTPSetup(code:)` next with the value.
+    func beginTOTPSetup() async throws {
+        struct SetupResponse: Decodable {
+            let enrolled: Bool?
+            let message: String?
+            let error: String?
+        }
+        let response: SetupResponse = try await authedPost(
+            path: "/oauth2/totp/setup",
+            formBody: [:]
+        )
+        if response.enrolled != true, let err = response.error {
+            throw APIError.serverError(err)
+        }
+    }
+
+    /// Confirm enrollment with the emailed code. On success 2FA is active.
+    func completeTOTPSetup(code: String) async throws {
+        struct VerifyResponse: Decodable {
+            let enabled: Bool?
+            let message: String?
+            let error: String?
+        }
+        let response: VerifyResponse = try await authedPost(
+            path: "/oauth2/totp/verify-setup",
+            formBody: ["totp_code": code.trimmingCharacters(in: .whitespaces)]
+        )
+        if response.enabled == true {
+            setTOTPEnabled(true)
+        } else {
+            throw APIError.serverError(response.error ?? "Verification failed")
+        }
+    }
+
+    /// Turn 2FA off. Requires a currently valid TOTP code.
+    func disableTOTP(code: String) async throws {
+        struct DisableResponse: Decodable {
+            let disabled: Bool?
+            let message: String?
+            let error: String?
+        }
+        let response: DisableResponse = try await authedPost(
+            path: "/oauth2/totp/disable",
+            formBody: ["totp_code": code.trimmingCharacters(in: .whitespaces)]
+        )
+        if response.disabled == true {
+            setTOTPEnabled(false)
+        } else {
+            throw APIError.serverError(response.error ?? "Failed to disable 2FA")
+        }
+    }
+
+    /// Mark the local 2FA flag (persists through relaunches).
+    func setTOTPEnabled(_ enabled: Bool) {
+        isTOTPEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: totpEnabledKey)
+    }
+
+    /// Shared helper for form-encoded POSTs to the auth endpoints. The OAuth2
+    /// controller consumes application/x-www-form-urlencoded for everything
+    /// except /totp/setup (no body); it tolerates an empty form body too.
+    private func authedPost<T: Decodable>(path: String, formBody: [String: String]) async throws -> T {
+        // Auth endpoints live on the same host as the tenant base URL; tokenURL
+        // already accounts for multi-tenant selection.
+        let baseURL = selectedTenant?.baseURL ?? Config.transportBaseURL
+        guard let url = URL(string: baseURL + path) else {
+            throw AuthError.networkError("Invalid URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        var components = URLComponents()
+        components.queryItems = formBody.map { URLQueryItem(name: $0.key, value: $0.value) }
+        request.httpBody = components.query?.data(using: .utf8) ?? Data()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.unknown }
+        guard (200...299).contains(http.statusCode) else {
+            // The backend returns 400 with { error, error_description } for
+            // validation failures — try to surface that message.
+            if let env = try? JSONDecoder().decode(AuthErrorEnvelope.self, from: data) {
+                throw APIError.serverError(env.error_description ?? env.error ?? "HTTP \(http.statusCode)")
+            }
+            throw APIError.serverError("HTTP \(http.statusCode)")
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// File-scope helper — Swift can't nest Decodable structs inside generic
+    /// functions, so we lift it out but keep it private to the service.
+    private struct AuthErrorEnvelope: Decodable {
+        let error: String?
+        let error_description: String?
     }
 
     // MARK: - Token Refresh

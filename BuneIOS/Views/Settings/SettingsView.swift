@@ -12,6 +12,8 @@ struct SettingsView: View {
     @EnvironmentObject var authService: AuthService
     @Environment(\.dismiss) var dismiss
 
+    @State private var totpSheetMode: TOTPSettingsSheet.Mode?
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -96,6 +98,31 @@ struct SettingsView: View {
                             .padding(.horizontal)
                         }
 
+                        // MARK: - Security Section
+                        VStack(spacing: 16) {
+                            HStack {
+                                Text("Security")
+                                    .font(.headline)
+                                    .foregroundColor(BuneColors.textPrimary)
+                                Spacer()
+                            }
+
+                            VStack(spacing: 10) {
+                                SecurityRow(
+                                    icon: "lock.shield.fill",
+                                    title: "Two-Factor Authentication",
+                                    subtitle: authService.isTOTPEnabled
+                                        ? "Enabled — a code is sent by email at sign-in."
+                                        : "Not enabled — sign-in uses only your password.",
+                                    stateBadge: authService.isTOTPEnabled ? .on : .off
+                                ) {
+                                    totpSheetMode = authService.isTOTPEnabled ? .disable : .enable
+                                }
+                            }
+                            .glassCard(cornerRadius: 16)
+                        }
+                        .padding(.horizontal)
+
                         // MARK: - Data & Cache Section
                         VStack(spacing: 16) {
                             HStack {
@@ -167,7 +194,71 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .sheet(item: Binding(
+                get: { totpSheetMode.map { TOTPSheetModeWrapper(mode: $0) } },
+                set: { totpSheetMode = $0?.mode }
+            )) { wrapper in
+                TOTPSettingsSheet(mode: wrapper.mode)
+                    .environmentObject(authService)
+            }
         }
+    }
+}
+
+private struct TOTPSheetModeWrapper: Identifiable {
+    let mode: TOTPSettingsSheet.Mode
+    var id: String { mode == .enable ? "enable" : "disable" }
+}
+
+// MARK: - Security Row Component
+struct SecurityRow: View {
+    enum BadgeState { case on, off }
+
+    let icon: String
+    let title: String
+    let subtitle: String
+    let stateBadge: BadgeState
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(BuneColors.accentPrimary)
+                    .frame(width: 32, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.bold())
+                        .foregroundColor(BuneColors.textPrimary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(BuneColors.textSecondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer()
+
+                Text(stateBadge == .on ? "ON" : "OFF")
+                    .font(.caption2.bold())
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(stateBadge == .on ? BuneColors.statusDelivered : BuneColors.textMuted)
+                    .cornerRadius(6)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(BuneColors.textTertiary)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(BuneColors.backgroundTertiary)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
