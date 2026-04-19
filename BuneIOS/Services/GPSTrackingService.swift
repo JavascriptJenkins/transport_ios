@@ -19,6 +19,11 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
 
     private let locationManager = CLLocationManager()
     private var apiClient: TransportAPIClient?
+    /// Persistent offline queue. When set, ping failures that look like
+    /// network issues get persisted through it so they survive cold launches.
+    /// The in-memory pendingPings array is kept alongside for quick-reconnect
+    /// retry without going back to disk.
+    private var offlineSyncService: OfflineSyncService?
     private var activeTransferId: Int?
     private var activeVehicleId: Int?
     private var pendingPings: [GPSPing] = []
@@ -34,6 +39,12 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
     override init() {
         super.init()
         configureLocationManager()
+    }
+
+    /// Attach the persistent offline queue. Safe to call multiple times
+    /// (most-recent wins). Called from LiveTrackingView.onAppear.
+    func configure(offlineSyncService: OfflineSyncService) {
+        self.offlineSyncService = offlineSyncService
     }
 
     private func configureLocationManager() {
@@ -165,9 +176,23 @@ class GPSTrackingService: NSObject, ObservableObject, @preconcurrency CLLocation
                 handleGeofenceAlert(alert)
             }
         } catch {
-            // Queue for later submission
-            pendingPings.append(ping)
-            self.pendingPingCount = pendingPings.count
+            // Two-level fallback:
+            //  1. Persist through OfflineSyncService when it's clearly a
+            //     network failure — survives cold launches, drains on
+            //     reconnect, survives tenant scoping like every other queued
+            //     op.
+            //  2. Fall back to the in-memory pendingPings array for
+            //     transient / unknown errors (server 5xx, short blips) so
+            //     we retry on the next ping tick without going to disk.
+            let persisted = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .gpsPing(ping)
+            ) ?? false
+
+            if !persisted {
+                pendingPings.append(ping)
+                self.pendingPingCount = pendingPings.count
+            }
         }
     }
 

@@ -22,6 +22,11 @@ class TransferDetailViewModel: ObservableObject {
     // MARK: - Dependencies
     private let transferId: Int
     private let apiClient: TransportAPIClient
+    /// Optional offline queue. Attached post-init from the view's .task via
+    /// configure(offlineSyncService:) because StateObject doesn't have
+    /// access to EnvironmentObjects at init time. Used for offline fallback
+    /// on status updates and chat sends.
+    private var offlineSyncService: OfflineSyncService?
     private var messagePollingTimer: Timer?
     private var detailPollingTimer: Timer?
     private var lastMessageTimestamp: String?
@@ -30,6 +35,10 @@ class TransferDetailViewModel: ObservableObject {
     init(transferId: Int, apiClient: TransportAPIClient) {
         self.transferId = transferId
         self.apiClient = apiClient
+    }
+
+    func configure(offlineSyncService: OfflineSyncService) {
+        self.offlineSyncService = offlineSyncService
     }
 
     // MARK: - Load All Data in Parallel
@@ -113,8 +122,46 @@ class TransferDetailViewModel: ObservableObject {
             transfer = try await apiClient.updateTransferStatus(id: transferId, status: newStatus)
             errorMessage = nil
         } catch {
-            errorMessage = "Failed to update status: \(error.localizedDescription)"
+            // Offline fallback: persist the status change and optimistically
+            // reflect it on the local Transfer so the progress bar / pill
+            // stay in sync with what the user just did. Drains on reconnect.
+            let queued = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .statusUpdate(transferId: transferId, status: newStatus)
+            ) ?? false
+            if queued {
+                optimisticallyApplyStatus(newStatus)
+                errorMessage = nil
+            } else {
+                errorMessage = "Failed to update status: \(error.localizedDescription)"
+            }
         }
+    }
+
+    /// Replace the current transfer's status locally without a server round
+    /// trip. Used only as a visual placeholder while the update is queued
+    /// offline — refreshDetailSilently() will overwrite with authoritative
+    /// values once the queue drains successfully.
+    private func optimisticallyApplyStatus(_ newStatus: String) {
+        guard let current = transfer else { return }
+        transfer = Transfer(
+            id: current.id,
+            manifestNumber: current.manifestNumber,
+            shipperFacilityName: current.shipperFacilityName,
+            shipperFacilityLicenseNumber: current.shipperFacilityLicenseNumber,
+            status: newStatus,
+            direction: current.direction,
+            packageCount: current.packageCount,
+            estimatedDepartureDateTime: current.estimatedDepartureDateTime,
+            estimatedArrivalDateTime: current.estimatedArrivalDateTime,
+            vehiclePlate: current.vehiclePlate,
+            driverName: current.driverName,
+            routeId: current.routeId,
+            routeName: current.routeName,
+            statusProgress: current.statusProgress,
+            statusColor: current.statusColor,
+            destinations: current.destinations
+        )
     }
 
     // MARK: - Send Message
@@ -122,19 +169,51 @@ class TransferDetailViewModel: ObservableObject {
     /// drivers, managers, and admins all show up on the correct side of the
     /// thread on both web and mobile.
     func sendMessage(_ text: String, sender: String = "driver") async {
-        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
 
         do {
             let message: ChatMessage = try await apiClient.postMessage(
                 transferId: transferId,
-                text: text,
+                text: trimmed,
                 sender: sender
             )
             messages.append(message)
             lastMessageTimestamp = message.timestamp
         } catch {
-            errorMessage = "Failed to send message: \(error.localizedDescription)"
+            // Offline fallback: persist the chat send and drop a local
+            // placeholder bubble into the thread so the user sees their
+            // message without waiting for connectivity. The queued op
+            // will reach the server on reconnect; the next message poll
+            // then replaces the placeholder with the real row.
+            let queued = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .chatMessage(transferId: transferId, text: trimmed, sender: sender)
+            ) ?? false
+            if queued {
+                messages.append(makePlaceholderMessage(text: trimmed, sender: sender))
+                errorMessage = nil
+            } else {
+                errorMessage = "Failed to send message: \(error.localizedDescription)"
+            }
         }
+    }
+
+    /// Build a placeholder ChatMessage for a queued-offline send. messageId
+    /// is nil (matches the real wire shape for in-flight / pending messages)
+    /// and isQueued is flipped so the chat bubble can render a "will send
+    /// when back online" indicator.
+    private func makePlaceholderMessage(text: String, sender: String) -> ChatMessage {
+        let now = ISO8601DateFormatter().string(from: Date())
+        return ChatMessage(
+            messageId: nil,
+            transferId: transferId,
+            sender: sender,
+            senderName: nil,
+            text: text,
+            timestamp: now,
+            isQueued: true
+        )
     }
 
     // MARK: - Message Polling

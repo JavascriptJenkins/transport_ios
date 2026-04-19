@@ -11,6 +11,7 @@ import CoreLocation
 struct LiveTrackingView: View {
     @StateObject private var viewModel: LiveTrackingViewModel
     @StateObject private var gpsService = GPSTrackingService()
+    @EnvironmentObject private var offlineSyncService: OfflineSyncService
     @State private var showDeliveryScan = false
     @State private var showPickupScan = false
     let transferId: Int
@@ -455,6 +456,9 @@ struct LiveTrackingView: View {
             await viewModel.loadStatus()
             viewModel.startPolling()
             gpsService.requestPermission()
+            // Attach the persistent offline queue before tracking starts so
+            // the very first ping failure already has a durable destination.
+            gpsService.configure(offlineSyncService: offlineSyncService)
             if let status = viewModel.trackingStatus?.status,
                status.uppercased() == "IN_TRANSIT" {
                 gpsService.startTracking(transferId: transferId, vehicleId: 0, apiClient: apiClient)

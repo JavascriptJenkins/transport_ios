@@ -52,13 +52,24 @@ struct ChatBubble: View {
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(displayedTime)
-                        .font(.caption2)
-                        .foregroundColor(
-                            isCurrentUser
-                                ? Color.white.opacity(0.6)
-                                : BuneColors.textTertiary
-                        )
+                    HStack(spacing: 6) {
+                        if message.isQueued == true {
+                            // Offline-queued placeholder — the queue drains
+                            // on reconnect and a message poll will replace
+                            // this row with the real server message.
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.caption2)
+                            Text("Sending when back online")
+                                .font(.caption2)
+                        }
+                        Text(displayedTime)
+                            .font(.caption2)
+                    }
+                    .foregroundColor(
+                        isCurrentUser
+                            ? Color.white.opacity(0.6)
+                            : BuneColors.textTertiary
+                    )
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)

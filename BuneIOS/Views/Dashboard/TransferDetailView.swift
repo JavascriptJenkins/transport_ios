@@ -10,6 +10,7 @@ import SwiftUI
 // MARK: - Transfer Detail View
 struct TransferDetailView: View {
     @StateObject private var viewModel: TransferDetailViewModel
+    @EnvironmentObject private var offlineSyncService: OfflineSyncService
     let transferId: Int
     let apiClient: TransportAPIClient
 
@@ -346,6 +347,10 @@ struct TransferDetailView: View {
             }
         }
         .task {
+            // Attach the offline queue before hitting any of the mutating
+            // endpoints so a status-update / chat-send failure lands in
+            // persistent storage instead of showing a terminal error.
+            viewModel.configure(offlineSyncService: offlineSyncService)
             await viewModel.loadAll()
             viewModel.startDetailPolling()
         }

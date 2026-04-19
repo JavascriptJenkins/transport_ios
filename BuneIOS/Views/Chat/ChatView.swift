@@ -14,6 +14,7 @@ struct ChatView: View {
     @State private var scrollTarget: Int?
     @Environment(\.scenePhase) var scenePhase
     @EnvironmentObject var authService: AuthService
+    @EnvironmentObject var offlineSyncService: OfflineSyncService
 
     let transferId: Int
     let apiClient: TransportAPIClient
@@ -139,6 +140,10 @@ struct ChatView: View {
             }
         }
         .task {
+            // Attach the offline queue so a send while offline persists
+            // instead of erroring. Bubble list will show a placeholder row
+            // until the next poll replaces it with the real server row.
+            viewModel.configure(offlineSyncService: offlineSyncService)
             await viewModel.loadMessages()
             viewModel.startMessagePolling()
         }

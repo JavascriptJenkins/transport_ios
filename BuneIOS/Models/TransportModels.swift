@@ -673,6 +673,14 @@ struct ChatMessage: Codable, Identifiable {
     let senderName: String?
     let text: String
     let timestamp: String
+    /// Client-side flag set when the message was queued for offline send
+    /// instead of reaching the server. Not serialized to/from the wire —
+    /// the decoder just leaves it nil for normal server responses.
+    var isQueued: Bool? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case messageId, transferId, sender, senderName, text, timestamp
+    }
 }
 
 // MARK: - Public Tracking
