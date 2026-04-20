@@ -696,26 +696,70 @@ class TransportAPIClient: ObservableObject {
     // Real backend paths live under `/transport/api/...` (ZoneController), NOT
     // `/api/v1/transport/zones`. Also: there is no flat list endpoint — zones
     // are scoped to a location (warehouse/hub).
+    //
+    // Every zone endpoint wraps its payload in a `{success, …}` envelope; the
+    // decoders below unwrap the relevant array field and throw on success=false.
+
+    private struct ZonesEnvelope: Decodable {
+        let success: Bool?
+        let zones: [Zone]?
+        let error: String?
+    }
+
+    private struct ZonePackagesEnvelope: Decodable {
+        let success: Bool?
+        let packages: [Package]?
+        let error: String?
+    }
+
+    private struct ZoneAuditEnvelope: Decodable {
+        let success: Bool?
+        let records: [ZoneScanAudit]?
+        let error: String?
+    }
+
+    private struct ZoneScanAck: Decodable {
+        let success: Bool
+        let error: String?
+    }
 
     /// List zones in a location. Backend: GET /transport/api/location/{locationId}/zones.
     func listZones(locationId: Int) async throws -> [Zone] {
-        try await get(path: "/transport/api/location/\(locationId)/zones")
+        let envelope: ZonesEnvelope = try await get(path: "/transport/api/location/\(locationId)/zones")
+        if envelope.success == false {
+            throw APIError.serverError(envelope.error ?? "Failed to load zones")
+        }
+        return envelope.zones ?? []
     }
 
-    func scanIntoZone(zoneId: Int, packageLabel: String, action: String) async throws -> Package {
+    func scanIntoZone(zoneId: Int, packageLabel: String, action: String) async throws {
         struct ScanRequest: Encodable {
             let packageLabel: String
             let action: String
         }
-        return try await post(path: "/transport/api/zones/\(zoneId)/scan", body: ScanRequest(packageLabel: packageLabel, action: action))
+        let ack: ZoneScanAck = try await post(
+            path: "/transport/api/zones/\(zoneId)/scan",
+            body: ScanRequest(packageLabel: packageLabel, action: action)
+        )
+        if !ack.success {
+            throw APIError.serverError(ack.error ?? "Zone scan rejected")
+        }
     }
 
     func getZonePackages(zoneId: Int) async throws -> [Package] {
-        try await get(path: "/transport/api/zones/\(zoneId)/packages")
+        let envelope: ZonePackagesEnvelope = try await get(path: "/transport/api/zones/\(zoneId)/packages")
+        if envelope.success == false {
+            throw APIError.serverError(envelope.error ?? "Failed to load zone packages")
+        }
+        return envelope.packages ?? []
     }
 
     func getZoneAudit(zoneId: Int) async throws -> [ZoneScanAudit] {
-        try await get(path: "/transport/api/zones/\(zoneId)/audit")
+        let envelope: ZoneAuditEnvelope = try await get(path: "/transport/api/zones/\(zoneId)/audit")
+        if envelope.success == false {
+            throw APIError.serverError(envelope.error ?? "Failed to load zone audit")
+        }
+        return envelope.records ?? []
     }
 
     // MARK: - Totes
