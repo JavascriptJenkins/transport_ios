@@ -12,6 +12,7 @@ struct LiveTrackingView: View {
     @StateObject private var viewModel: LiveTrackingViewModel
     @StateObject private var gpsService = GPSTrackingService()
     @EnvironmentObject private var offlineSyncService: OfflineSyncService
+    @EnvironmentObject private var notificationService: NotificationService
     @State private var showDeliveryScan = false
     @State private var showPickupScan = false
     let transferId: Int
@@ -484,6 +485,11 @@ struct LiveTrackingView: View {
             // the very first ping failure already has a durable destination.
             gpsService.configure(offlineSyncService: offlineSyncService)
             gpsService.requestPermission()
+
+            // Wire the notification service so a driver who opens Live
+            // Tracking directly (bypassing the Transfers list) still gets
+            // ETA + overdue alerts scheduled for this one transfer.
+            viewModel.configure(notificationService: notificationService)
 
             // Await the initial status/details load BEFORE checking state —
             // startPolling() kicks off a background load but doesn't return

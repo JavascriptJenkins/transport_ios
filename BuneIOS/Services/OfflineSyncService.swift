@@ -38,6 +38,14 @@ class OfflineSyncService: ObservableObject {
         case statusUpdate(transferId: Int, status: String)
         case zoneScan(zoneId: Int, packageLabel: String, action: String)
         case chatMessage(transferId: Int, text: String, sender: String)
+        /// Pickup scan session complete — marks the session COMPLETE and
+        /// (via zone assignments) lets the transfer's effective status
+        /// advance to IN_TRANSIT.
+        case completePickupSession(sessionId: Int)
+        /// Delivery handoff complete with signature. Backend guards on
+        /// all-packages-scanned, so this only succeeds if every scan in
+        /// front of it in the queue drained cleanly.
+        case completeDeliverySession(sessionId: Int, signatureData: String, signerName: String)
     }
 
     init() {
@@ -198,6 +206,14 @@ class OfflineSyncService: ObservableObject {
             _ = try await api.scanIntoZone(zoneId: zoneId, packageLabel: label, action: action)
         case .chatMessage(let transferId, let text, let sender):
             let _ = try await api.postMessage(transferId: transferId, text: text, sender: sender)
+        case .completePickupSession(let sessionId):
+            let _ = try await api.completePickup(sessionId: sessionId)
+        case .completeDeliverySession(let sessionId, let signatureData, let signerName):
+            let _ = try await api.completeDelivery(
+                sessionId: sessionId,
+                signatureData: signatureData,
+                signerName: signerName
+            )
         }
     }
 

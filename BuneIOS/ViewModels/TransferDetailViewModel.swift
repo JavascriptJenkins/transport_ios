@@ -27,6 +27,10 @@ class TransferDetailViewModel: ObservableObject {
     /// access to EnvironmentObjects at init time. Used for offline fallback
     /// on status updates and chat sends.
     private var offlineSyncService: OfflineSyncService?
+    /// Notification service used only to cancel scheduled ETA/overdue alerts
+    /// when the user drives a terminal transition from this screen. The
+    /// scheduling itself happens in TransferListViewModel / LiveTrackingVM.
+    private var notificationService: NotificationService?
     private var messagePollingTimer: Timer?
     private var detailPollingTimer: Timer?
     private var lastMessageTimestamp: String?
@@ -39,6 +43,10 @@ class TransferDetailViewModel: ObservableObject {
 
     func configure(offlineSyncService: OfflineSyncService) {
         self.offlineSyncService = offlineSyncService
+    }
+
+    func configure(notificationService: NotificationService) {
+        self.notificationService = notificationService
     }
 
     // MARK: - Load All Data in Parallel
@@ -121,6 +129,12 @@ class TransferDetailViewModel: ObservableObject {
         do {
             transfer = try await apiClient.updateTransferStatus(id: transferId, status: newStatus)
             errorMessage = nil
+            // Terminal transitions invalidate any pending ETA/overdue alerts
+            // the Transfers list may have scheduled for this transfer.
+            let terminal: Set<String> = ["DELIVERED", "ACCEPTED", "CANCELED"]
+            if terminal.contains(newStatus.uppercased()) {
+                notificationService?.cancelPendingAlerts(transferId: transferId)
+            }
         } catch {
             // Offline fallback: persist the status change and optimistically
             // reflect it on the local Transfer so the progress bar / pill

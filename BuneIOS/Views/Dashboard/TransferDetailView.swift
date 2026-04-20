@@ -11,8 +11,14 @@ import SwiftUI
 struct TransferDetailView: View {
     @StateObject private var viewModel: TransferDetailViewModel
     @EnvironmentObject private var offlineSyncService: OfflineSyncService
+    @EnvironmentObject private var authService: AuthService
+    @EnvironmentObject private var notificationService: NotificationService
     let transferId: Int
     let apiClient: TransportAPIClient
+
+    // Cancel-transfer confirm dialog state. Gated to non-terminal statuses
+    // and non-driver roles to mirror the web dashboard's cancel button.
+    @State private var showCancelConfirm = false
 
     // Share-sheet plumbing for the manifest PDF.
     @State private var manifestShareURL: URL?
@@ -203,8 +209,43 @@ struct TransferDetailView: View {
                                 }
                                 .accentButton()
                             }
+
+                            // Cancel — admin / manager only, for non-terminal
+                            // statuses. Same rule the dashboard applies on the
+                            // web (dashboard.html cancel button). Backend V1
+                            // /status endpoint accepts CANCELED unconditionally
+                            // for non-terminal rows.
+                            if shouldShowCancelButton(transfer.status) {
+                                Button(role: .destructive) {
+                                    showCancelConfirm = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "xmark.circle.fill")
+                                        Text("Cancel Transfer")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .foregroundColor(BuneColors.errorColor)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(BuneColors.errorColor.opacity(0.12))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .stroke(BuneColors.errorColor.opacity(0.35), lineWidth: 1)
+                                            )
+                                    )
+                                }
+                            }
                         }
                         .frame(maxWidth: .infinity)
+                        .alert("Cancel this transfer?", isPresented: $showCancelConfirm) {
+                            Button("Cancel Transfer", role: .destructive) {
+                                Task { await viewModel.updateStatus("CANCELED") }
+                            }
+                            Button("Keep Transfer", role: .cancel) {}
+                        } message: {
+                            Text("This sets the transfer to CANCELED. Packages stay where they are; the driver won't see it on pickup or delivery lists.")
+                        }
 
                         // MARK: - Section 5: Packages
                         GlassCard {
@@ -351,6 +392,7 @@ struct TransferDetailView: View {
             // endpoints so a status-update / chat-send failure lands in
             // persistent storage instead of showing a terminal error.
             viewModel.configure(offlineSyncService: offlineSyncService)
+            viewModel.configure(notificationService: notificationService)
             await viewModel.loadAll()
             viewModel.startDetailPolling()
         }
@@ -491,6 +533,15 @@ struct TransferDetailView: View {
 
     private func shouldShowStartDeliveryButton(_ status: String) -> Bool {
         ["DELIVERED"].contains(status)
+    }
+
+    /// Cancel is available to admins + managers on any non-terminal
+    /// transfer. Drivers never see it (they cancel via dispatcher chat).
+    /// Matches the web dashboard role gate.
+    private func shouldShowCancelButton(_ status: String) -> Bool {
+        let terminal: Set<String> = ["DELIVERED", "ACCEPTED", "CANCELED"]
+        guard !terminal.contains(status.uppercased()) else { return false }
+        return authService.isAdmin || authService.isManager
     }
 
     private func formatDateTime(_ dateStr: String) -> String {

@@ -229,15 +229,25 @@ class PickupScanViewModel: ObservableObject {
             // Don't force tulipStatus = IN_TRANSIT here. Effective status is
             // zone-derived — the backend's TransportStatusService returns
             // IN_TRANSIT only when every package is physically in a VEHICLE
-            // zone (or vehicle-package assignment). Writing IN_TRANSIT into
-            // tulipStatus would pollute the stored value and let the V1 list
-            // endpoint show IN_TRANSIT for a transfer whose packages are
-            // still in the originator.
+            // zone (or vehicle-package assignment).
 
             currentPhase = .complete
             isLoading = false
         } catch {
-            errorMessage = "Failed to complete pickup: \(error.localizedDescription)"
+            // Offline fallback. Because the queue drains in FIFO order and
+            // any pending offline scans will run before this completion, a
+            // "finish pickup on a dead signal" path still produces a
+            // correctly-completed session once the device reconnects.
+            let queued = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .completePickupSession(sessionId: session.sessionId)
+            ) ?? false
+            if queued {
+                currentPhase = .complete
+                errorMessage = nil
+            } else {
+                errorMessage = "Failed to complete pickup: \(error.localizedDescription)"
+            }
             isLoading = false
         }
     }

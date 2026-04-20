@@ -224,6 +224,14 @@ class DeliveryScanViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
+        // Receipt URL matches the public endpoint that the web's
+        // delivery-scan.html uses after submit:
+        //   /public/transfer/receipt/{transferId}
+        // (see PublicTransferTrackingController:/receipt/{transferId}).
+        // Pre-computed here so both the online and offline-queued paths
+        // resolve the same receipt for the complete screen QR.
+        let receiptUrl = "\(apiClient.baseURL)/public/transfer/receipt/\(session.transferId)"
+
         do {
             // completeDelivery flips the session to COMPLETE and the transfer
             // to ACCEPTED server-side. The backend guards on scannedCount >=
@@ -236,22 +244,30 @@ class DeliveryScanViewModel: ObservableObject {
                 signerName: signerName
             )
 
-            // Receipt URL matches the public endpoint that the web's
-            // delivery-scan.html uses after submit:
-            //   /public/transfer/receipt/{transferId}
-            // (see PublicTransferTrackingController:/receipt/{transferId}).
-            // The QR on the completion screen links the customer directly
-            // to the PDF-downloadable receipt page.
-            let receiptUrl = "\(apiClient.baseURL)/public/transfer/receipt/\(session.transferId)"
-            deliveryReceipt = DeliveryReceipt(
-                receiptUrl: receiptUrl,
-                qrCodeUrl: receiptUrl
-            )
-
+            deliveryReceipt = DeliveryReceipt(receiptUrl: receiptUrl, qrCodeUrl: receiptUrl)
             currentPhase = .complete
             isLoading = false
         } catch {
-            errorMessage = "Failed to complete delivery: \(error.localizedDescription)"
+            // Offline fallback: persist the full signature payload + signer
+            // name so the session can complete cleanly on reconnect. The
+            // queue drains in FIFO order, so any pending offline delivery
+            // scans finish first and the backend's all-scanned guard stays
+            // satisfied when this completion eventually replays.
+            let queued = offlineSyncService?.enqueueIfNetworkFailure(
+                error,
+                operation: .completeDeliverySession(
+                    sessionId: session.sessionId,
+                    signatureData: signatureData,
+                    signerName: signerName
+                )
+            ) ?? false
+            if queued {
+                deliveryReceipt = DeliveryReceipt(receiptUrl: receiptUrl, qrCodeUrl: receiptUrl)
+                currentPhase = .complete
+                errorMessage = nil
+            } else {
+                errorMessage = "Failed to complete delivery: \(error.localizedDescription)"
+            }
             isLoading = false
         }
     }

@@ -145,9 +145,19 @@ class LiveTrackingViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// Optional NotificationService. Attached from the view's .task via
+    /// configure(notificationService:) — a driver who opens Live Tracking
+    /// directly (without visiting the transfer list first) would otherwise
+    /// miss ETA + overdue alerts for the transfer they're watching.
+    private var notificationService: NotificationService?
+
     init(transferId: Int, apiClient: TransportAPIClient) {
         self.transferId = transferId
         self.apiClient = apiClient
+    }
+
+    func configure(notificationService: NotificationService) {
+        self.notificationService = notificationService
     }
 
     func loadStatus() async {
@@ -168,6 +178,7 @@ class LiveTrackingViewModel: ObservableObject {
             self.trackingDetails = details
         }
 
+        reschedulePendingAlerts()
         isLoading = false
     }
 
@@ -176,6 +187,7 @@ class LiveTrackingViewModel: ObservableObject {
     private func refreshStatusSilently() async {
         if let updated = try? await apiClient.getTrackingStatus(transferId: transferId) {
             self.trackingStatus = updated
+            reschedulePendingAlerts()
         }
     }
 
@@ -191,6 +203,32 @@ class LiveTrackingViewModel: ObservableObject {
     func stopPolling() {
         pollingTimer?.invalidate()
         pollingTimer = nil
+    }
+
+    /// Keep the ETA + overdue alerts in sync with the latest status snapshot.
+    /// On terminal statuses we cancel any pending alerts; on active ones with
+    /// an estimated arrival we schedule / reschedule the "arriving soon" and
+    /// "overdue" pair. Matches TransferListViewModel's per-refresh behavior
+    /// so the two code paths don't fight over the same identifiers.
+    private func reschedulePendingAlerts() {
+        guard let notificationService else { return }
+        let status = (trackingStatus?.status ?? "").uppercased()
+        let manifest = trackingDetails?.manifestNumber ?? "transfer \(transferId)"
+
+        if status == "DELIVERED" || status == "ACCEPTED" || status == "CANCELED" {
+            notificationService.cancelPendingAlerts(transferId: transferId)
+            return
+        }
+
+        guard let iso = trackingDetails?.estimatedArrival,
+              let arrival = Self.parseFlexibleDate(iso) else { return }
+
+        notificationService.scheduleETAApproaching(
+            transferId: transferId, manifestNumber: manifest, arrivalAt: arrival
+        )
+        notificationService.scheduleOverdueAlert(
+            transferId: transferId, manifestNumber: manifest, arrivalAt: arrival
+        )
     }
 
     // MARK: - Actions

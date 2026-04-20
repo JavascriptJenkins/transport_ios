@@ -36,8 +36,14 @@ struct RouteMapView: View {
                     }
                 }
 
-                // Route polyline between stops
-                if stops.count >= 2 {
+                // Planned route — prefer the backend's road-following polyline
+                // (route.routePolylineJson, populated by the dashboard's
+                // auto-corridor directions call) and fall back to straight
+                // lines between stops if no polyline has been generated yet.
+                if let roadPoints = routePolylineCoordinates, roadPoints.count >= 2 {
+                    MapPolyline(coordinates: roadPoints)
+                        .stroke(BuneColors.accentPrimary, lineWidth: 3)
+                } else if stops.count >= 2 {
                     MapPolyline(coordinates: stopCoordinates)
                         .stroke(BuneColors.accentPrimary, lineWidth: 3)
                 }
@@ -122,6 +128,23 @@ struct RouteMapView: View {
             guard let lat = stop.lat, let lon = stop.lon else { return nil }
             return CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
+    }
+
+    /// Decoded form of `route.routePolylineJson`. Backend stores a JSON
+    /// array of `{lat, lng}` objects (see GeofenceService.decodePolyline +
+    /// TransportDashboardController:/api/routes/{id}/auto-corridor). Returns
+    /// nil if the route hasn't had a polyline generated yet.
+    private var routePolylineCoordinates: [CLLocationCoordinate2D]? {
+        guard let json = route?.routePolylineJson,
+              let data = json.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Double]] else {
+            return nil
+        }
+        let coords = raw.compactMap { dict -> CLLocationCoordinate2D? in
+            guard let lat = dict["lat"], let lon = dict["lng"] ?? dict["lon"] else { return nil }
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+        return coords.count >= 2 ? coords : nil
     }
 
     private func centerOnVehicle() {
